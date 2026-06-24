@@ -27,7 +27,10 @@ public class Robot extends TimedRobot {
   private RobotContainer m_robotContainer;
 
   private TitanQuad motor;   //Declare motor, encoder object
+  private TitanQuad motor1;   //Declare motor, encoder object
+  private TitanQuad motor2;   //Declare motor, encoder object
   private TitanQuadEncoder encoder; 
+
   /**
    * This function is run when the robot is first started up and should be used for any
    * initialization code.
@@ -37,8 +40,11 @@ public class Robot extends TimedRobot {
     // Instantiate our RobotContainer.  This will perform all our button bindings, and put our
     // autonomous chooser on the dashboard.
     
+    
     // Initialize the Titan motor controller (CAN ID 42, Port M0)
     motor = new TitanQuad(42, 0); 
+    motor1 = new TitanQuad(42, 1);
+    motor2 = new TitanQuad(42, 3);
     
     // Initialize the encoder attached to the same Titan and port.
     // The '1.0' is the distance per pulse multiplier.
@@ -56,12 +62,16 @@ public class Robot extends TimedRobot {
    */
   @Override
   public void robotPeriodic() {
-      motor.set(0.2);
+    
     // Runs the Scheduler.  This is responsible for polling buttons, adding newly-scheduled
     // commands, running already-scheduled commands, removing finished or interrupted commands,
     // and running subsystem periodic() methods.  This must be called from the robot's periodic
     // block in order for anything in the Command-based framework to work.
     CommandScheduler.getInstance().run();
+    
+    motor.set(0.3);
+    motor1.set(0.3);
+    motor2.set(0.3);
     
    
     
