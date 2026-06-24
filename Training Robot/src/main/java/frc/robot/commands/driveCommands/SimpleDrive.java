@@ -33,7 +33,7 @@ public class SimpleDrive extends CommandBase
     @Override
     public void end (boolean interrupted)
     {
-        drive.setDriveMotorSpeeds(0.0, 0.0, 0.0);;
+        drive.setDriveMotorSpeeds(0.0, 0.0, 0.0);
     }
 
     @Override
