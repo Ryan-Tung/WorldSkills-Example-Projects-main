@@ -27,7 +27,7 @@ public class DriveWithPID extends CommandBase
         pidYAxis = new PIDController(1, 0, 0);
         pidYAxis.setTolerance(epsilonDistance);
 
-        pidZAxis = new PIDController(0.1, 0, 0);
+        pidZAxis = new PIDController(0.01, 0.003, 0); 
         pidZAxis.setTolerance(epsilonYaw);
     }
 
@@ -44,7 +44,7 @@ public class DriveWithPID extends CommandBase
     public void execute()
     {
         drive.holonomicDrive(0.0,
-         MathUtil.clamp(pidYAxis.calculate(drive.getAverageForwardEncoderDistance(), setpointDistance), -0.5, 0.5),
+         0.0,
          MathUtil.clamp(pidZAxis.calculate(drive.getYaw(), setpointYaw), -1, 1));
     }
 
