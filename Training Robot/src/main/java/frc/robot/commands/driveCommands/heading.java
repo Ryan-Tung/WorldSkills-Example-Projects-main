@@ -6,7 +6,7 @@ import edu.wpi.first.wpiutil.math.MathUtil;
 import frc.robot.RobotContainer;
 import frc.robot.subsystems.DriveTrain;
 
-public class forward extends CommandBase
+public class heading extends CommandBase
 {
     //Bring in the Drive Train subsystem
     private static final DriveTrain drive = RobotContainer.driveTrain;
@@ -18,18 +18,17 @@ public class forward extends CommandBase
     PIDController pidYAxis;
     PIDController pidZAxis;
 
-    // public Forward(double setpointDistance, double epsilonDistance, double setpointYaw, double epsilonYaw)
-    public forward(double setpointDistance, double setpointYaw)
+    public heading(double setpointYaw)
     {
         this.setpointDistance = setpointDistance;
         this.setpointYaw = setpointYaw;
         addRequirements(drive);
 
         pidYAxis = new PIDController(1, 0, 0);
-        pidYAxis.setTolerance(15.0);
+        pidYAxis.setTolerance(2.0);
 
         pidZAxis = new PIDController(0.01, 0.003, 0); //KP KI KD 
-        pidZAxis.setTolerance(15.0);
+        pidZAxis.setTolerance(2.0);
     }
 
     @Override
@@ -44,12 +43,9 @@ public class forward extends CommandBase
     @Override
     public void execute()
     {
-        double ySpeed = MathUtil.clamp(pidYAxis.calculate(drive.getAverageForwardEncoderDistance(), setpointDistance), -1, 1);
-    
-        // Calculate the output for turning (Z-axis)
-        double zSpeed = MathUtil.clamp(pidZAxis.calculate(drive.getYaw(), setpointYaw), -1, 1);
-
-        drive.holonomicDrive(0.0, ySpeed, zSpeed);
+        drive.holonomicDrive(0.0,
+         0.0,
+         MathUtil.clamp(pidZAxis.calculate(drive.getYaw(), setpointYaw), -1, 1));
     }
 
     @Override
