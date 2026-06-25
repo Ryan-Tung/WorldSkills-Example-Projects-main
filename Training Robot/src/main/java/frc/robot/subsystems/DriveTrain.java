@@ -146,7 +146,7 @@ public class DriveTrain extends SubsystemBase
      */
     public double getLeftEncoderDistance()
     {
-        return leftEncoder.getEncoderDistance();
+        return leftEncoder.getEncoderDistance()*-1;
     }
 
     /**
@@ -176,7 +176,7 @@ public class DriveTrain extends SubsystemBase
      */
     public double getAverageForwardEncoderDistance()
     {
-        return (getLeftEncoderDistance() + getRightEncoderDistance()) / 2; 
+        return (getLeftEncoderDistance() - getRightEncoderDistance()) / 2; 
     }
 
     /**
