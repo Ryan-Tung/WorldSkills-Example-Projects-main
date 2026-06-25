@@ -7,7 +7,7 @@ public class DriveForwardWithPID extends AutoCommand
     public DriveForwardWithPID ()
     {
         //Drive 1000mm, 10mm error, maintain an angle of 0, 1 degree error
-        super(new DriveWithPID(0, 0, 90, 1).withTimeout(5));
+        super(new DriveWithPID(0, 0, 45, 1).withTimeout(1));
         //Timeout used just incase the command does not finish
     }
 }

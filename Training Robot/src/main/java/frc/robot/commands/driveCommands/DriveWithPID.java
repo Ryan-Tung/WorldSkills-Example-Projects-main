@@ -27,7 +27,7 @@ public class DriveWithPID extends CommandBase
         pidYAxis = new PIDController(1, 0, 0);
         pidYAxis.setTolerance(epsilonDistance);
 
-        pidZAxis = new PIDController(0.01, 0.003, 0); 
+        pidZAxis = new PIDController(0.01, 0.003, 0); //KP KI KD 
         pidZAxis.setTolerance(epsilonYaw);
     }
 
