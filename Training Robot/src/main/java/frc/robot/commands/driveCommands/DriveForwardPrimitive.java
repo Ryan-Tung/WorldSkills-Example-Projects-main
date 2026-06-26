@@ -5,6 +5,7 @@ import edu.wpi.first.wpilibj.controller.PIDController;
 import edu.wpi.first.wpiutil.math.MathUtil;
 import edu.wpi.first.wpilibj2.command.CommandBase;
 import frc.robot.RobotContainer;
+import frc.robot.subsystems.DriveTrain;
 
 public class DriveForwardPrimitive extends CommandBase {
     private final double targetDistance;
@@ -19,15 +20,19 @@ public class DriveForwardPrimitive extends CommandBase {
         
         addRequirements(RobotContainer.driveTrain);
 
-        pidYAxis = new PIDController(0.01, 0.0, 0.0);
-        pidZAxis = new PIDController(0.02, 0.0, 0.0);
+        pidYAxis = new PIDController(0.03, 0.0, 0.0);
+        pidZAxis = new PIDController(0.01, 0.0, 0.0);
         
         pidYAxis.setTolerance(15.0,10.0); 
     }
 
     @Override
     public void initialize() {
+        
+        
+        RobotContainer.driveTrain.resetYaw();
         RobotContainer.driveTrain.resetEncoders();
+        
     }
 
     @Override

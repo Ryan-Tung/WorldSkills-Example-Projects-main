@@ -14,7 +14,7 @@ public class TurnToAnglePrimitive extends CommandBase {
         this.targetHeading = heading_deg;
         addRequirements(RobotContainer.driveTrain);
 
-        pidZAxis = new PIDController(0.02, 0.0, 0.0);
+        pidZAxis = new PIDController(0.03, 0.0, 0.0);
         pidZAxis.enableContinuousInput(-180.0, 180.0); 
         pidZAxis.setTolerance(2.0); 
     }
