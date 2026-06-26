@@ -19,7 +19,7 @@ public class DriveForwardPrimitive extends CommandBase {
         
         addRequirements(RobotContainer.driveTrain);
 
-        pidYAxis = new PIDController(0.005, 0.0, 0.0);
+        pidYAxis = new PIDController(0.01, 0.0, 0.0);
         pidZAxis = new PIDController(0.02, 0.0, 0.0);
         
         pidYAxis.setTolerance(15.0,10.0); 
@@ -33,7 +33,7 @@ public class DriveForwardPrimitive extends CommandBase {
     @Override
     public void execute() {
         double speedY = MathUtil.clamp(pidYAxis.calculate(RobotContainer.driveTrain.getAverageForwardEncoderDistance(), targetDistance), -0.5, 0.5);
-        double speedZ = MathUtil.clamp(pidZAxis.calculate(RobotContainer.driveTrain.getYaw(), targetHeading), -0.5, 0.5);
+        double speedZ = MathUtil.clamp(pidZAxis.calculate(RobotContainer.driveTrain.getYaw(), targetHeading), -0.5, 34);
         
         RobotContainer.driveTrain.holonomicDrive(0.0, speedY, speedZ);
     }

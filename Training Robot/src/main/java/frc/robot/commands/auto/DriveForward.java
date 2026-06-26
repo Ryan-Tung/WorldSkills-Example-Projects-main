@@ -11,13 +11,46 @@ public class DriveForward extends AutoCommand
     public DriveForward ()
     {
         super(new SequentialCommandGroup(
-            new DriveForwardPrimitive(1000,0),
+        
+            new DriveForwardPrimitive(500,-30),
 
-            new WaitCommand(1),
+            new WaitCommand(0.25),
+
+            new TurnToAnglePrimitive(60),
+
+            new WaitCommand(0.25),
+
+            new DriveForwardPrimitive(500,60),
+
+            
+            new WaitCommand(0.25),
+
+            new TurnToAnglePrimitive(150),
+
+            
+            new WaitCommand(0.25),
+
+            new DriveForwardPrimitive(500,150),  
+
+            new WaitCommand(0.25),
+
+            new TurnToAnglePrimitive(-120),
+
+            new WaitCommand(0.25),
+
+            new DriveForwardPrimitive(500,-130),
+            
+            new WaitCommand(0.25),
+            
+            new TurnToAnglePrimitive(-30),
+            
+            new WaitCommand(0.25),
+            
+            new DriveForwardPrimitive(500,-30)));
 
             
 
 
-            new TurnToAnglePrimitive(90)));
-        
+
+
 }}

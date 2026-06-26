@@ -43,6 +43,8 @@ public class DriveTrain extends SubsystemBase
                                                     .getEntry();
     private NetworkTableEntry backEncoderValue = tab.add("Back Encoder", 0)
                                                     .getEntry();
+    private NetworkTableEntry average = tab.add("Average Encoder", 0)
+                                                    .getEntry();
     private NetworkTableEntry gyroValue = tab.add("NavX Yaw", 0)
                                                     .getEntry();
 
@@ -156,7 +158,7 @@ public class DriveTrain extends SubsystemBase
      */
     public double getRightEncoderDistance()
     {
-        return rightEncoder.getEncoderDistance() * -1;
+        return rightEncoder.getEncoderDistance() *-1 ;
     }
 
     /**
@@ -176,7 +178,7 @@ public class DriveTrain extends SubsystemBase
      */
     public double getAverageForwardEncoderDistance()
     {
-        return (getLeftEncoderDistance() - getRightEncoderDistance()) / 2; 
+        return ((getLeftEncoderDistance() - getRightEncoderDistance())/2 ); 
     }
 
     /**
@@ -218,6 +220,7 @@ public class DriveTrain extends SubsystemBase
         leftEncoderValue.setDouble(getLeftEncoderDistance());
         rightEncoderValue.setDouble(getRightEncoderDistance());
         backEncoderValue.setDouble(getBackEncoderDistance());
+        average.setDouble(getAverageForwardEncoderDistance());
         gyroValue.setDouble(getYaw());
     }
 }
