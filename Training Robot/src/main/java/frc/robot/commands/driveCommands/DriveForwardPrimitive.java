@@ -26,11 +26,12 @@ public class DriveForwardPrimitive extends CommandBase {
         pidYAxis.setTolerance(15.0,10.0); 
     }
 
+    
+
+    
     @Override
     public void initialize() {
         
-        
-        RobotContainer.driveTrain.resetYaw();
         RobotContainer.driveTrain.resetEncoders();
         
     }
@@ -45,8 +46,13 @@ public class DriveForwardPrimitive extends CommandBase {
 
     @Override
     public boolean isFinished() {
-        return pidYAxis.atSetpoint();
+        boolean atDistance = pidYAxis.atSetpoint();
+
+        boolean obstacleFound = RobotContainer.driveTrain.getDistance() < 10.0;
+        
+        return atDistance || obstacleFound;
     }
+
 
     @Override
     public void end(boolean interrupted) {

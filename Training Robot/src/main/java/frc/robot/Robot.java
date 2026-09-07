@@ -15,6 +15,7 @@ import edu.wpi.first.wpilibj2.command.CommandScheduler;
 import frc.robot.commands.auto.AutoCommand;
 import frc.robot.commands.auto.DriveForward;
 import frc.robot.commands.auto.DriveForwardWithPID;
+import frc.robot.commands.auto.DriveForwardWithIR;
 
 /**
  * The VM is configured to automatically run this class, and to call the functions corresponding to
@@ -86,6 +87,7 @@ public class Robot extends TimedRobot {
    */
   @Override
   public void autonomousInit() {
+    RobotContainer.driveTrain.resetYaw();
     autonomousCommand = m_robotContainer.getAutonomousCommand();
     // schedule the autonomous command (example)
     if (autonomousCommand != null) {

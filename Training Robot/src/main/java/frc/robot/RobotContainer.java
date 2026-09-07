@@ -51,10 +51,15 @@ public class RobotContainer
     //Set default command for the drive train subsystem
     driveTrain.setDefaultCommand(new Teleop());
     oms.setDefaultCommand(new TeleopOMS());
+
+
+    
   }
 
+  
   public Command getAutonomousCommand()
   {
+    
     String mode = autoChooser.getSelected();
     return autoMode.getOrDefault(mode, new DriveForward());
   }

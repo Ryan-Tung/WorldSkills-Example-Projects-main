@@ -10,17 +10,22 @@ import frc.robot.commands.driveCommands.SimpleDrive;
 import frc.robot.commands.driveCommands.TurnToAnglePrimitive;
 import frc.robot.subsystems.DriveTrain;
 
-public class DriveForwardWithPID extends AutoCommand
-{
-public DriveForwardWithPID ()
-{
-    super(new SequentialCommandGroup(
+public class DriveForwardWithIR extends SequentialCommandGroup {
+    // Add the DriveTrain parameter here
+    public DriveForwardWithIR(DriveTrain driveTrain) {
         
+        addCommands(
             new DriveForwardPrimitive(500, 0),
             new TurnToAnglePrimitive(90),
             new DriveForwardPrimitive(500, -50),
             new WaitCommand(0.25),
             new TurnToAnglePrimitive(-140)
+        );
+    
+            }
+        
 
-        ));
-}}
+
+
+
+    }

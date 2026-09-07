@@ -11,9 +11,18 @@ import edu.wpi.first.wpilibj.shuffleboard.ShuffleboardTab;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.Constants;
 
+//import the Analog Library
+import edu.wpi.first.wpilibj.AnalogInput;
+
+
 public class DriveTrain extends SubsystemBase
 {
+    private final AnalogInput sharp = new AnalogInput(0);
+        //Create the Analog Object
 
+        
+
+    
     /**
      * Motors
      */
@@ -21,6 +30,8 @@ public class DriveTrain extends SubsystemBase
     private TitanQuad rightMotor;
     private TitanQuad backMotor;
 
+
+    
     /**
      * Encoders
      */
@@ -45,8 +56,15 @@ public class DriveTrain extends SubsystemBase
                                                     .getEntry();
     private NetworkTableEntry average = tab.add("Average Encoder", 0)
                                                     .getEntry();
+                    
+     private NetworkTableEntry IRsensor = tab.add("IRsensor", 0)
+                                                    .getEntry();
     private NetworkTableEntry gyroValue = tab.add("NavX Yaw", 0)
                                                     .getEntry();
+                                                    //Constuct a new instance
+        
+
+                                                    
 
     public DriveTrain ()
     {
@@ -68,6 +86,14 @@ public class DriveTrain extends SubsystemBase
          * Sensors
          */
         navx = new AHRS(SPI.Port.kMXP);
+        
+    }
+
+    
+    //Create an accessor method
+    public double getDistance()
+    {
+        return (Math.pow(sharp.getAverageVoltage(), -1.2045)) * 27.726;
     }
 
     /**
@@ -222,5 +248,6 @@ public class DriveTrain extends SubsystemBase
         backEncoderValue.setDouble(getBackEncoderDistance());
         average.setDouble(getAverageForwardEncoderDistance());
         gyroValue.setDouble(getYaw());
+        IRsensor.setDouble(getDistance());
     }
 }
