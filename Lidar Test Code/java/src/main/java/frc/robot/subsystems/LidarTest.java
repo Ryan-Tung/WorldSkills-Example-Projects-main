@@ -2,66 +2,193 @@ package frc.robot.subsystems;
 
 import com.studica.frc.Lidar;
 
+import edu.wpi.first.networktables.NetworkTable;
+import edu.wpi.first.networktables.NetworkTableInstance;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 
 public class LidarTest extends SubsystemBase
 {
-
-    // Lidar Library
     private Lidar lidar;
-    // Lidar Scan Data Storage Class
     private Lidar.ScanData scanData;
-    // Dashboard flag to prevent updating when not scanning
+
     public boolean scanning = true;
 
-    public LidarTest ()
+    private NetworkTable lidarTable;
+
+    public LidarTest()
     {
-        /**
-         * Top USB 2.0 port of VMX = kUSB1
-         * Bottom USB 2.0 port of VMX = kUSB2
-         */
-        lidar = new Lidar(Lidar.Port.kUSB1); //Lidar will start spinning the moment this is called
+        lidar = new Lidar(Lidar.Port.kUSB1);
 
-        // Configure filters
-        lidar.clusterConfig(50.0f, 5);
-        // lidar.kalmanConfig(1e-5f, 1e-1f, 1.0f);
-        // lidar.movingAverageConfig(5);
-        // lidar.medianConfig(5);
-        // lidar.jitterConfig(50.0f);
+        lidarTable = NetworkTableInstance
+                .getDefault()
+                .getTable("Lidar");
 
-        // Enable Filter
-        lidar.enableFilter(Lidar.Filter.kCLUSTER, true);
+        System.out.println("Lidar initialized");
     }
 
-    /**
-     * Starts the lidar if it was stopped
-     */
     public void startScan()
     {
         lidar.start();
         scanning = true;
+
+        System.out.println("Lidar started");
     }
 
-    /**
-     * Stops the lidar if needed. This will reduce the overhead of CPU and RAM by very little. 
-     */
     public void stopScan()
     {
         lidar.stop();
         scanning = false;
+
+        System.out.println("Lidar stopped");
     }
 
     @Override
-    public void periodic ()
+    public void periodic()
     {
-        if (scanning)
+        if (!scanning)
         {
-            //Update scanData class
-            scanData = lidar.getData();
-            //Print out Angle and distance at 60 degrees
-            SmartDashboard.putNumber("Angle",  scanData.angle[60]);
-            SmartDashboard.putNumber("Distance", scanData.distance[60]);
+            return;
         }
+
+        scanData = lidar.getData();
+
+        if (scanData == null ||
+            scanData.angle == null ||
+            scanData.distance == null)
+        {
+            return;
+        }
+
+        int count = Math.min(
+                scanData.angle.length,
+                scanData.distance.length
+        );
+
+        if (count <= 0)
+        {
+            return;
+        }
+
+        // Temporary arrays
+        double[] tempA = new double[count * 2];
+        double[] tempB = new double[count * 2];
+
+        int countA = 0;
+        int countB = 0;
+
+        int q1 = 0;
+        int q2 = 0;
+        int q3 = 0;
+        int q4 = 0;
+
+        double minAngle = 999.0;
+        double maxAngle = -999.0;
+
+        for (int i = 0; i < count; i++)
+        {
+            double angle = scanData.angle[i];
+            double distance = scanData.distance[i];
+
+            // Normalize angle
+            angle = angle % 360.0;
+
+            if (angle < 0)
+            {
+                angle += 360.0;
+            }
+
+            // Valid distance
+            if (distance >= 120.0 &&
+                distance <= 5000.0)
+            {
+                if (angle < minAngle)
+                {
+                    minAngle = angle;
+                }
+
+                if (angle > maxAngle)
+                {
+                    maxAngle = angle;
+                }
+
+                // -----------------------------
+                // 0 - 180 degrees
+                // -----------------------------
+                if (angle < 180.0)
+                {
+                    tempA[countA * 2] = angle;
+                    tempA[countA * 2 + 1] = distance;
+
+                    countA++;
+
+                    if (angle < 90.0)
+                    {
+                        q1++;
+                    }
+                    else
+                    {
+                        q2++;
+                    }
+                }
+
+                // -----------------------------
+                // 180 - 360 degrees
+                // -----------------------------
+                else
+                {
+                    tempB[countB * 2] = angle;
+                    tempB[countB * 2 + 1] = distance;
+
+                    countB++;
+
+                    if (angle < 270.0)
+                    {
+                        q3++;
+                    }
+                    else
+                    {
+                        q4++;
+                    }
+                }
+            }
+        }
+
+        // Create correctly sized arrays
+        double[] outputA = new double[countA * 2];
+        double[] outputB = new double[countB * 2];
+
+        for (int i = 0; i < countA * 2; i++)
+        {
+            outputA[i] = tempA[i];
+        }
+
+        for (int i = 0; i < countB * 2; i++)
+        {
+            outputB[i] = tempB[i];
+        }
+
+        // Send both halves
+        lidarTable
+                .getEntry("ScanA")
+                .setDoubleArray(outputA);
+
+        lidarTable
+                .getEntry("ScanB")
+                .setDoubleArray(outputB);
+
+        // Debug
+        SmartDashboard.putNumber("Raw Count", count);
+
+        SmartDashboard.putNumber("ScanA Points", countA);
+        SmartDashboard.putNumber("ScanB Points", countB);
+
+        SmartDashboard.putNumber("Min Raw Angle", minAngle);
+        SmartDashboard.putNumber("Max Raw Angle", maxAngle);
+
+        SmartDashboard.putNumber("0-90 Points", q1);
+        SmartDashboard.putNumber("90-180 Points", q2);
+        SmartDashboard.putNumber("180-270 Points", q3);
+        SmartDashboard.putNumber("270-360 Points", q4);
     }
 }

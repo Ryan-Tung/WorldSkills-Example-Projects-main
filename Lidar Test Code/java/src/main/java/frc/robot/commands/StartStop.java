@@ -11,34 +11,32 @@ public class StartStop extends CommandBase
     private static final LidarTest lidar = RobotContainer.lidar;
     private static final OI oi = RobotContainer.oi;
 
-
-    public StartStop ()
+    public StartStop()
     {
         addRequirements(lidar);
     }
 
-
     @Override
     public void initialize()
-    {}
+    {
+        System.out.println("Starting Lidar...");
+        lidar.startScan();
+    }
 
     @Override
     public void execute()
     {
-        // Simple way to show starting and stopping of lidar
-        if (oi.getDriveXButton())
+        // Press Y to stop the Lidar command
+        if (oi.getDriveYButton())
         {
-            lidar.startScan();
-        }
-        else if (oi.getDriveYButton())
-        {
-            lidar.stopScan();
+            cancel();
         }
     }
 
     @Override
-    public void end (boolean interrupted)
+    public void end(boolean interrupted)
     {
+        System.out.println("Stopping Lidar...");
         lidar.stopScan();
     }
 
