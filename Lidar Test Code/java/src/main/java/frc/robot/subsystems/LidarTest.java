@@ -70,7 +70,6 @@ public class LidarTest extends SubsystemBase
             return;
         }
 
-        // Temporary arrays
         double[] tempA = new double[count * 2];
         double[] tempB = new double[count * 2];
 
@@ -90,7 +89,6 @@ public class LidarTest extends SubsystemBase
             double angle = scanData.angle[i];
             double distance = scanData.distance[i];
 
-            // Normalize angle
             angle = angle % 360.0;
 
             if (angle < 0)
@@ -98,7 +96,6 @@ public class LidarTest extends SubsystemBase
                 angle += 360.0;
             }
 
-            // Valid distance
             if (distance >= 120.0 &&
                 distance <= 5000.0)
             {
@@ -112,14 +109,10 @@ public class LidarTest extends SubsystemBase
                     maxAngle = angle;
                 }
 
-                // -----------------------------
-                // 0 - 180 degrees
-                // -----------------------------
                 if (angle < 180.0)
                 {
                     tempA[countA * 2] = angle;
                     tempA[countA * 2 + 1] = distance;
-
                     countA++;
 
                     if (angle < 90.0)
@@ -131,15 +124,10 @@ public class LidarTest extends SubsystemBase
                         q2++;
                     }
                 }
-
-                // -----------------------------
-                // 180 - 360 degrees
-                // -----------------------------
                 else
                 {
                     tempB[countB * 2] = angle;
                     tempB[countB * 2 + 1] = distance;
-
                     countB++;
 
                     if (angle < 270.0)
@@ -154,7 +142,6 @@ public class LidarTest extends SubsystemBase
             }
         }
 
-        // Create correctly sized arrays
         double[] outputA = new double[countA * 2];
         double[] outputB = new double[countB * 2];
 
@@ -168,7 +155,6 @@ public class LidarTest extends SubsystemBase
             outputB[i] = tempB[i];
         }
 
-        // Send both halves
         lidarTable
                 .getEntry("ScanA")
                 .setDoubleArray(outputA);
@@ -177,9 +163,7 @@ public class LidarTest extends SubsystemBase
                 .getEntry("ScanB")
                 .setDoubleArray(outputB);
 
-        // Debug
         SmartDashboard.putNumber("Raw Count", count);
-
         SmartDashboard.putNumber("ScanA Points", countA);
         SmartDashboard.putNumber("ScanB Points", countB);
 
