@@ -10,6 +10,18 @@ package frc.robot;
 import frc.robot.subsystems.LidarTest;
 import frc.robot.gamepad.OI;
 import frc.robot.commands.StartStop;
+import java.util.HashMap;
+import java.util.Map;
+
+import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
+import edu.wpi.first.wpilibj2.command.Command;
+import frc.robot.commands.Teleop;
+import frc.robot.commands.TeleopOMS;
+import frc.robot.commands.auto.AutoCommand;
+import frc.robot.commands.auto.DriveForward;
+import frc.robot.gamepad.OI;
+import frc.robot.subsystems.DriveTrain;
+import frc.robot.subsystems.OMS;
 
 /**
  * This class is where the bulk of the robot should be declared.  Since Command-based is a
@@ -21,15 +33,49 @@ public class RobotContainer
 {
   // The robot's subsystems and commands are defined here...
   public static LidarTest lidar;
+  // public static OI oi;
+
+  /**
+   * The container for the robot.  Contains subsystems, OI devices, and commands.
+   */
+  // public RobotContainer() 
+  // {
+  //   lidar = new LidarTest();
+  //   oi = new OI();
+  //   lidar.setDefaultCommand(new StartStop());
+  // }
+  // The robot's subsystems and commands are defined here...
+
+  public static DriveTrain driveTrain;
+  public static OMS oms;
   public static OI oi;
+
+
+  public static SendableChooser<String> autoChooser;
+  public static Map<String, AutoCommand> autoMode = new HashMap<>();
 
   /**
    * The container for the robot.  Contains subsystems, OI devices, and commands.
    */
   public RobotContainer() 
   {
-    lidar = new LidarTest();
+    //Create new instances
+    driveTrain = new DriveTrain();
+    oms = new OMS();
     oi = new OI();
-    lidar.setDefaultCommand(new StartStop());
+
+    //Set default command for the drive train subsystem
+    driveTrain.setDefaultCommand(new Teleop());
+    oms.setDefaultCommand(new TeleopOMS());
   }
+
+  public Command getAutonomousCommand()
+  {
+    String mode = autoChooser.getSelected();
+    return autoMode.getOrDefault(mode, new DriveForward());
+  }
+  public DriveTrain getDriveTrain() {
+    return driveTrain; // Replace 'm_driveTrain' with your actual DriveTrain variable name
+}
+
 }
