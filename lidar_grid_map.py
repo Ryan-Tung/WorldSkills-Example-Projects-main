@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 from networktables import NetworkTables
 
+
 # =========================================================
 # CONFIGURATION
 # =========================================================
@@ -36,23 +37,12 @@ robot_heading_deg = 0.0
 # =========================================================
 # LIVE LIDAR DATA
 # =========================================================
-# Keep ScanA and ScanB separately.
 
 scan_a_angles = []
 scan_a_distances = []
 
 scan_b_angles = []
 scan_b_distances = []
-
-
-# =========================================================
-# ACCUMULATED MAP POINTS
-# =========================================================
-
-map_x_points = []
-map_y_points = []
-
-MAX_MAP_POINTS = 30000
 
 
 # =========================================================
@@ -144,9 +134,17 @@ def update_robot_pose():
     global robot_y
     global robot_heading_deg
 
-    robot_x = pose_table.getEntry("X").getDouble(robot_x)
+    robot_x = (
+        pose_table
+        .getEntry("X")
+        .getDouble(robot_x)
+    )
 
-    robot_y = pose_table.getEntry("Y").getDouble(robot_y)
+    robot_y = (
+        pose_table
+        .getEntry("Y")
+        .getDouble(robot_y)
+    )
 
     robot_heading_deg = (
         pose_table
@@ -163,34 +161,43 @@ def lidar_to_world(angle_deg, distance_mm):
 
     distance_m = distance_mm / 1000.0
 
+    # -----------------------------------------------------
     # Robot convention:
     #
-    # 0 degrees   = forward
-    # 90 degrees  = right
-    # 180 degrees = backwards
-    # 270 degrees = left
+    # 0   = front
+    # 90  = right
+    # 180 = back
+    # 270 = left
+    # -----------------------------------------------------
 
     global_angle_deg = (
-        robot_heading_deg + angle_deg
+        robot_heading_deg
+        +
+        angle_deg
     )
 
     global_angle_rad = np.radians(
         global_angle_deg
     )
 
-    # X = right/left
-    # Y = forward/back
+
+    # X = right / left
+    # Y = forward / back
 
     hit_x = (
         robot_x
         +
-        distance_m * np.sin(global_angle_rad)
+        distance_m
+        *
+        np.sin(global_angle_rad)
     )
 
     hit_y = (
         robot_y
         +
-        distance_m * np.cos(global_angle_rad)
+        distance_m
+        *
+        np.cos(global_angle_rad)
     )
 
     return hit_x, hit_y
@@ -208,20 +215,24 @@ def update_grid_point(angle_deg, distance_mm):
     if distance_mm > 5000:
         return
 
+
     hit_x, hit_y = lidar_to_world(
         angle_deg,
         distance_mm
     )
+
 
     robot_gx, robot_gy = world_to_grid(
         robot_x,
         robot_y
     )
 
+
     hit_gx, hit_gy = world_to_grid(
         hit_x,
         hit_y
     )
+
 
     if not (
         0 <= hit_gx < GRID_SIZE
@@ -230,6 +241,7 @@ def update_grid_point(angle_deg, distance_mm):
     ):
         return
 
+
     ray = bresenham(
         robot_gx,
         robot_gy,
@@ -237,7 +249,11 @@ def update_grid_point(angle_deg, distance_mm):
         hit_gy
     )
 
-    # Cells before obstacle = free
+
+    # -----------------------------------------------------
+    # Everything before obstacle = free
+    # -----------------------------------------------------
+
     for gx, gy in ray[:-1]:
 
         if (
@@ -247,7 +263,11 @@ def update_grid_point(angle_deg, distance_mm):
         ):
             grid[gy, gx] = FREE
 
-    # Last cell = obstacle
+
+    # -----------------------------------------------------
+    # Final point = obstacle
+    # -----------------------------------------------------
+
     grid[hit_gy, hit_gx] = OCCUPIED
 
 
@@ -256,9 +276,6 @@ def update_grid_point(angle_deg, distance_mm):
 # =========================================================
 
 def process_scan(value):
-
-    global map_x_points
-    global map_y_points
 
     angles = value[0::2]
     distances = value[1::2]
@@ -271,48 +288,62 @@ def process_scan(value):
     new_angles = []
     new_distances = []
 
-    # Get current robot location before mapping this scan
+
     update_robot_pose()
+
 
     for i in range(length):
 
-        angle = float(angles[i])
-        distance = float(distances[i])
+        angle = float(
+            angles[i]
+        )
+
+        distance = float(
+            distances[i]
+        )
+
 
         if 120 <= distance <= 5000:
 
-            new_angles.append(angle)
-            new_distances.append(distance)
+            new_angles.append(
+                angle
+            )
 
-            # -----------------------------
-            # OCCUPANCY GRID
-            # -----------------------------
+            new_distances.append(
+                distance
+            )
+
+
+            # =================================================
+            # OCCUPANCY GRID ONLY
+            # =================================================
+            #
+            # View 2 still keeps mapping history.
+            #
+            # View 3 DOES NOT store old points anymore.
 
             update_grid_point(
                 angle,
                 distance
             )
 
-            # -----------------------------
-            # ACCUMULATED WORLD MAP
-            # -----------------------------
 
-            hit_x, hit_y = lidar_to_world(
-                angle,
-                distance
-            )
-
-            map_x_points.append(hit_x)
-            map_y_points.append(hit_y)
-
-    return new_angles, new_distances
+    return (
+        new_angles,
+        new_distances
+    )
 
 
 # =========================================================
 # NETWORKTABLES CALLBACK
 # =========================================================
 
-def lidar_callback(table, key, value, isNew):
+def lidar_callback(
+    table,
+    key,
+    value,
+    isNew
+):
 
     global scan_a_angles
     global scan_a_distances
@@ -320,8 +351,6 @@ def lidar_callback(table, key, value, isNew):
     global scan_b_angles
     global scan_b_distances
 
-    global map_x_points
-    global map_y_points
 
     with data_lock:
 
@@ -330,27 +359,18 @@ def lidar_callback(table, key, value, isNew):
             (
                 scan_a_angles,
                 scan_a_distances
-            ) = process_scan(value)
+            ) = process_scan(
+                value
+            )
+
 
         elif key == "ScanB":
 
             (
                 scan_b_angles,
                 scan_b_distances
-            ) = process_scan(value)
-
-        else:
-            return
-
-        # Prevent unlimited memory growth
-        if len(map_x_points) > MAX_MAP_POINTS:
-
-            map_x_points = (
-                map_x_points[-MAX_MAP_POINTS:]
-            )
-
-            map_y_points = (
-                map_y_points[-MAX_MAP_POINTS:]
+            ) = process_scan(
+                value
             )
 
 
@@ -362,14 +382,19 @@ def update_display(frame):
 
     update_robot_pose()
 
+
     with data_lock:
 
-        # Combine ScanA + ScanB
+        # =================================================
+        # COMBINE LIVE SCAN A + B
+        # =================================================
+
         angles = np.array(
             scan_a_angles
             +
             scan_b_angles
         )
+
 
         distances = np.array(
             scan_a_distances
@@ -377,19 +402,23 @@ def update_display(frame):
             scan_b_distances
         )
 
-        grid_copy = grid.copy()
 
-        map_x = np.array(
-            map_x_points
+        grid_copy = (
+            grid.copy()
         )
 
-        map_y = np.array(
-            map_y_points
+
+        current_x = (
+            robot_x
         )
 
-        current_x = robot_x
-        current_y = robot_y
-        current_heading = robot_heading_deg
+        current_y = (
+            robot_y
+        )
+
+        current_heading = (
+            robot_heading_deg
+        )
 
 
     # =====================================================
@@ -398,17 +427,27 @@ def update_display(frame):
 
     radar_ax.clear()
 
-    radar_ax.set_theta_zero_location("N")
-    radar_ax.set_theta_direction(-1)
+
+    radar_ax.set_theta_zero_location(
+        "N"
+    )
+
+
+    radar_ax.set_theta_direction(
+        -1
+    )
+
 
     radar_ax.set_ylim(
         0,
         MAX_DISTANCE_METERS
     )
 
+
     radar_ax.set_title(
         "1. Live LiDAR Radar"
     )
+
 
     if len(angles) > 0:
 
@@ -416,11 +455,18 @@ def update_display(frame):
             angles
         )
 
+
         distances_m = (
-            distances / 1000.0
+            distances
+            /
+            1000.0
         )
 
-        # Laser rays
+
+        # -------------------------------------------------
+        # LASER RAYS
+        # -------------------------------------------------
+
         for angle, distance in zip(
             angles_rad,
             distances_m
@@ -433,12 +479,17 @@ def update_display(frame):
                 alpha=0.15
             )
 
-        # Detection points
+
+        # -------------------------------------------------
+        # CURRENT DETECTION POINTS
+        # -------------------------------------------------
+
         radar_ax.scatter(
             angles_rad,
             distances_m,
             s=10
         )
+
 
     # Robot centre
     radar_ax.scatter(
@@ -456,10 +507,12 @@ def update_display(frame):
         grid_copy
     )
 
+
     robot_gx, robot_gy = world_to_grid(
         current_x,
         current_y
     )
+
 
     grid_robot_marker.set_data(
         [robot_gx],
@@ -468,77 +521,156 @@ def update_display(frame):
 
 
     # =====================================================
-    # VIEW 3 - MOVING WORLD MAP
+    # VIEW 3 - LIVE WORLD DETECTIONS ONLY
     # =====================================================
 
     map_ax.clear()
 
+
     map_ax.set_title(
-        "3. Moving LiDAR Map"
+        "3. Live LiDAR Detection"
     )
+
 
     map_ax.set_xlabel(
         "X (m)"
     )
 
+
     map_ax.set_ylabel(
         "Y (m)"
     )
 
+
+    # =====================================================
+    # KEEP VIEW CENTRED ON ROBOT
+    # =====================================================
+
     map_ax.set_xlim(
-        -MAP_SIZE_METERS / 2,
-        MAP_SIZE_METERS / 2
+        current_x
+        -
+        MAX_DISTANCE_METERS,
+
+        current_x
+        +
+        MAX_DISTANCE_METERS
     )
 
+
     map_ax.set_ylim(
-        -MAP_SIZE_METERS / 2,
-        MAP_SIZE_METERS / 2
+        current_y
+        -
+        MAX_DISTANCE_METERS,
+
+        current_y
+        +
+        MAX_DISTANCE_METERS
     )
+
 
     map_ax.set_aspect(
         "equal"
     )
 
+
     map_ax.grid(
         True
     )
 
-    if len(map_x) > 0:
+
+    # =====================================================
+    # CONVERT CURRENT SCAN ONLY TO WORLD COORDINATES
+    # =====================================================
+
+    live_x = []
+    live_y = []
+
+
+    for angle, distance in zip(
+        angles,
+        distances
+    ):
+
+        # Only valid current detections
+
+        if (
+            distance >= 120
+            and
+            distance <= 5000
+        ):
+
+            hit_x, hit_y = lidar_to_world(
+                angle,
+                distance
+            )
+
+
+            live_x.append(
+                hit_x
+            )
+
+            live_y.append(
+                hit_y
+            )
+
+
+    # =====================================================
+    # SHOW ONLY CURRENT DETECTIONS
+    # =====================================================
+
+    if len(live_x) > 0:
 
         map_ax.scatter(
-            map_x,
-            map_y,
-            s=3
+            live_x,
+            live_y,
+            s=8
         )
 
-    # Robot location
+
+    # =====================================================
+    # ROBOT LOCATION
+    # =====================================================
+
     map_ax.scatter(
         [current_x],
         [current_y],
         s=80
     )
 
-    # -----------------------------
+
+    # =====================================================
     # ROBOT HEADING ARROW
-    # -----------------------------
+    # =====================================================
 
     heading_rad = np.radians(
         current_heading
     )
 
+
     arrow_length = 0.5
+
 
     arrow_x = (
         current_x
         +
-        arrow_length * np.sin(heading_rad)
+        arrow_length
+        *
+        np.sin(
+            heading_rad
+        )
     )
+
 
     arrow_y = (
         current_y
         +
-        arrow_length * np.cos(heading_rad)
+        arrow_length
+        *
+        np.cos(
+            heading_rad
+        )
     )
+
 
     map_ax.plot(
         [current_x, arrow_x],
@@ -546,14 +678,26 @@ def update_display(frame):
         linewidth=2
     )
 
-    # Show pose as text
+
+    # =====================================================
+    # POSE TEXT
+    # =====================================================
+
     map_ax.text(
-        -4.8,
-        4.6,
+        current_x
+        -
+        4.7,
+
+        current_y
+        +
+        4.3,
+
         f"X: {current_x:.2f} m\n"
         f"Y: {current_y:.2f} m\n"
-        f"Heading: {current_heading:.1f}°"
+        f"Heading: {current_heading:.1f}°\n"
+        f"Detected: {len(live_x)}"
     )
+
 
     return (
         grid_image,
@@ -571,15 +715,21 @@ def main():
         f"Connecting to robot at {ROBOT_IP}..."
     )
 
+
     NetworkTables.initialize(
         server=ROBOT_IP
     )
+
 
     NetworkTables.setUpdateRate(
         0.010
     )
 
-    time.sleep(2)
+
+    time.sleep(
+        2
+    )
+
 
     print(
         "Connected:",
@@ -594,19 +744,22 @@ def main():
     global lidar_table
     global pose_table
 
+
     lidar_table = NetworkTables.getTable(
         "Lidar"
     )
+
 
     pose_table = NetworkTables.getTable(
         "RobotPose"
     )
 
-    # Listen specifically for both halves
+
     lidar_table.addEntryListener(
         lidar_callback,
         key="ScanA"
     )
+
 
     lidar_table.addEntryListener(
         lidar_callback,
@@ -625,13 +778,14 @@ def main():
     global grid_image
     global grid_robot_marker
 
+
     fig = plt.figure(
         figsize=(18, 6)
     )
 
 
     # =====================================================
-    # 1. RADAR
+    # 1. LIVE RADAR
     # =====================================================
 
     radar_ax = fig.add_subplot(
@@ -652,6 +806,7 @@ def main():
         2
     )
 
+
     grid_image = grid_ax.imshow(
         grid,
         origin="lower",
@@ -659,19 +814,28 @@ def main():
         vmax=1
     )
 
+
     grid_ax.set_title(
         "2. Occupancy Grid"
     )
+
 
     grid_ax.set_xlabel(
         "Grid X"
     )
 
+
     grid_ax.set_ylabel(
         "Grid Y"
     )
 
-    centre = GRID_SIZE // 2
+
+    centre = (
+        GRID_SIZE
+        //
+        2
+    )
+
 
     grid_robot_marker, = grid_ax.plot(
         [centre],
@@ -681,7 +845,7 @@ def main():
 
 
     # =====================================================
-    # 3. MOVING MAP
+    # 3. LIVE DETECTION MAP
     # =====================================================
 
     map_ax = fig.add_subplot(
@@ -702,11 +866,14 @@ def main():
         cache_frame_data=False
     )
 
+
     plt.tight_layout()
 
+
     print(
-        "Launching live radar + occupancy grid + moving map..."
+        "Launching LiDAR visualizer..."
     )
+
 
     plt.show()
 
