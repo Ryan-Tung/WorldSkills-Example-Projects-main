@@ -215,8 +215,8 @@ public class LidarTest extends SubsystemBase
     public double getFrontDistance()
     {
         return getClosestDistance(
-                350,
-                10
+                330,
+                30
         );
     }
 

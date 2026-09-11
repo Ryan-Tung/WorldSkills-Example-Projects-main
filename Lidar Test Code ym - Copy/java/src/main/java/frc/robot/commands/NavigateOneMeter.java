@@ -2,6 +2,7 @@ package frc.robot.commands;
 
 import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.controller.PIDController;
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.CommandBase;
 import edu.wpi.first.wpiutil.math.MathUtil;
 
@@ -23,7 +24,7 @@ public class NavigateOneMeter extends CommandBase
     // =====================================================
 
     private static final double TARGET_FORWARD_MM =
-            1000.0;
+            2000.0;
 
 
     // =====================================================
@@ -31,7 +32,7 @@ public class NavigateOneMeter extends CommandBase
     // =====================================================
 
     private static final double FORWARD_SPEED =
-            0.30;
+            0.35;
 
     private static final double FINAL_FORWARD_SPEED =
             0.18;
@@ -47,8 +48,9 @@ public class NavigateOneMeter extends CommandBase
     private static final double CRAB_SPEED =
             0.45;
 
+
     /*
-     * Your working crab correction.
+     * Working crab correction:
      *
      * +X -> -0.05
      * -X -> +0.05
@@ -59,8 +61,6 @@ public class NavigateOneMeter extends CommandBase
 
     /*
      * +X physically moves right.
-     *
-     * Change to -1 only if your robot is opposite.
      */
     private static final int RIGHT_X_SIGN =
             1;
@@ -73,11 +73,14 @@ public class NavigateOneMeter extends CommandBase
     private static final double MIN_VALID_LIDAR =
             120.0;
 
+
     private static final double OBSTACLE_DISTANCE =
             300.0;
 
+
     private static final double FRONT_CLEAR_DISTANCE =
             400.0;
+
 
     private static final double SIDE_CLEAR_DISTANCE =
             400.0;
@@ -90,22 +93,15 @@ public class NavigateOneMeter extends CommandBase
     private static final int OBSTACLE_CONFIRM_LOOPS =
             15;
 
+
     private static final int CLEAR_CONFIRM_LOOPS =
             8;
 
 
     // =====================================================
-    // IMPORTANT CLEARANCE SETTINGS
+    // CLEARANCE
     // =====================================================
 
-    /*
-     * OLD = 150 mm
-     *
-     * NEW = 300 mm.
-     *
-     * Front LiDAR becoming clear does NOT mean
-     * the side wheel has cleared the object.
-     */
     private static final double MIN_CRAB_DISTANCE =
             300.0;
 
@@ -114,27 +110,35 @@ public class NavigateOneMeter extends CommandBase
             700.0;
 
 
-    /*
-     * Robot must already move this far forward
-     * beside the obstacle before side-clear is
-     * even considered.
-     */
     private static final double MIN_PASS_DISTANCE =
-            400.0;
+            600.0;
 
 
-    /*
-     * NEW:
-     *
-     * Once the side LiDAR says the obstacle has
-     * disappeared, KEEP DRIVING FORWARD another
-     * 250 mm.
-     *
-     * This gives the rear wheel/body enough room
-     * before the robot comes sideways again.
-     */
     private static final double EXTRA_CLEARANCE_DISTANCE =
             250.0;
+
+
+    // =====================================================
+    // RETURN TO ORIGINAL TRACK
+    // =====================================================
+
+    /*
+     * How close to original strafe encoder position
+     * before we consider the robot back on track.
+     */
+    private static final double RETURN_TOLERANCE =
+            10.0;
+
+
+    /*
+     * Slow down for final part of return.
+     */
+    private static final double RETURN_SLOW_ZONE =
+            100.0;
+
+
+    private static final double RETURN_SLOW_SPEED =
+            0.20;
 
 
     // =====================================================
@@ -143,8 +147,10 @@ public class NavigateOneMeter extends CommandBase
 
     private final PIDController headingPID;
 
+
     private static final double HEADING_KP =
             0.01;
+
 
     private static final double MAX_HEADING_CORRECTION =
             0.08;
@@ -183,8 +189,10 @@ public class NavigateOneMeter extends CommandBase
     private int obstacleCounter =
             0;
 
+
     private int frontClearCounter =
             0;
+
 
     private int sideClearCounter =
             0;
@@ -198,15 +206,45 @@ public class NavigateOneMeter extends CommandBase
             0;
 
 
+    /*
+     * Encoder position at beginning of current
+     * outward crab section.
+     */
     private double crabStartEncoder =
             0.0;
 
 
-    private double crabOutDistance =
+    /*
+     * IMPORTANT:
+     *
+     * Saved BEFORE the robot first moves sideways.
+     *
+     * This is the actual sideways track that
+     * we want to return to.
+     */
+    private double originalTrackEncoder =
             0.0;
 
 
-    private double crabReturnStartEncoder =
+    /*
+     * Learns how the strafe encoder responds
+     * to crab motor direction.
+     *
+     * Example:
+     *
+     * command +X
+     * encoder becomes negative
+     *
+     * then this becomes -1.
+     */
+    private double strafeEncoderDirection =
+            1.0;
+
+
+    /*
+     * Used for monitoring only.
+     */
+    private double crabOutDistance =
             0.0;
 
 
@@ -214,12 +252,6 @@ public class NavigateOneMeter extends CommandBase
             0.0;
 
 
-    /*
-     * NEW:
-     *
-     * Used for the additional forward clearance
-     * after the obstacle disappears from the side.
-     */
     private double clearanceStartForward =
             0.0;
 
@@ -239,8 +271,9 @@ public class NavigateOneMeter extends CommandBase
     private final Timer timer =
             new Timer();
 
+
     private static final double TOTAL_TIMEOUT =
-            25.0;
+            35.0;
 
 
     // =====================================================
@@ -294,8 +327,10 @@ public class NavigateOneMeter extends CommandBase
         obstacleCounter =
                 0;
 
+
         frontClearCounter =
                 0;
+
 
         sideClearCounter =
                 0;
@@ -308,14 +343,22 @@ public class NavigateOneMeter extends CommandBase
         crabStartEncoder =
                 0.0;
 
+
+        originalTrackEncoder =
+                0.0;
+
+
+        strafeEncoderDirection =
+                1.0;
+
+
         crabOutDistance =
                 0.0;
 
-        crabReturnStartEncoder =
-                0.0;
 
         passStartForward =
                 0.0;
+
 
         clearanceStartForward =
                 0.0;
@@ -328,19 +371,6 @@ public class NavigateOneMeter extends CommandBase
 
         ignoreObstacleUntil =
                 0.50;
-
-
-        System.out.println(
-                "================================"
-        );
-
-        System.out.println(
-                "NAVIGATION START"
-        );
-
-        System.out.println(
-                "================================"
-        );
     }
 
 
@@ -351,6 +381,58 @@ public class NavigateOneMeter extends CommandBase
     @Override
     public void execute()
     {
+        // =================================================
+        // SMARTDASHBOARD
+        // =================================================
+
+        SmartDashboard.putString(
+                "Navigation State",
+                state.toString()
+        );
+
+
+        SmartDashboard.putNumber(
+                "Front Distance",
+                lidar.getFrontDistance()
+        );
+
+
+        SmartDashboard.putNumber(
+                "Left Distance",
+                lidar.getLeftDistance()
+        );
+
+
+        SmartDashboard.putNumber(
+                "Right Distance",
+                lidar.getRightDistance()
+        );
+
+
+        SmartDashboard.putNumber(
+                "Forward Distance",
+                getForwardDistance()
+        );
+
+
+        SmartDashboard.putNumber(
+                "Current Strafe",
+                drive.getAverageStrafeEncoderDistance()
+        );
+
+
+        SmartDashboard.putNumber(
+                "Original Track",
+                originalTrackEncoder
+        );
+
+
+        SmartDashboard.putNumber(
+                "Strafe Encoder Direction",
+                strafeEncoderDirection
+        );
+
+
         switch (state)
         {
             case FORWARD:
@@ -392,11 +474,7 @@ public class NavigateOneMeter extends CommandBase
 
             case FAILED:
 
-                drive.holonomicDrive(
-                        0.0,
-                        0.0,
-                        0.0
-                );
+                stopRobot();
 
                 break;
         }
@@ -410,10 +488,7 @@ public class NavigateOneMeter extends CommandBase
     private void runForward()
     {
         double forwardDistance =
-                Math.abs(
-                        drive
-                                .getAverageForwardEncoderDistance()
-                );
+                getForwardDistance();
 
 
         double remaining =
@@ -423,21 +498,20 @@ public class NavigateOneMeter extends CommandBase
 
 
         // =================================================
-        // 1 METRE REACHED
+        // FINAL TARGET
         // =================================================
 
-        if (remaining <= 15.0)
+        if (
+            remaining
+            <=
+            15.0
+        )
         {
             stopRobot();
 
 
             state =
                     State.FINISHED;
-
-
-            System.out.println(
-                    "1 METRE REACHED"
-            );
 
 
             return;
@@ -482,7 +556,7 @@ public class NavigateOneMeter extends CommandBase
 
 
         // =================================================
-        // REAL OBSTACLE CONFIRMED
+        // OBSTACLE CONFIRMED
         // =================================================
 
         if (
@@ -497,9 +571,23 @@ public class NavigateOneMeter extends CommandBase
             chooseSide();
 
 
-            crabStartEncoder =
+            /*
+             * SAVE THE ORIGINAL TRACK HERE.
+             *
+             * This value must NOT be changed
+             * while avoiding the same obstacle.
+             */
+            originalTrackEncoder =
                     drive
                             .getAverageStrafeEncoderDistance();
+
+
+            crabStartEncoder =
+                    originalTrackEncoder;
+
+
+            crabOutDistance =
+                    0.0;
 
 
             frontClearCounter =
@@ -510,13 +598,12 @@ public class NavigateOneMeter extends CommandBase
                     0;
 
 
+            sideClearCounter =
+                    0;
+
+
             state =
                     State.CRAB_OUT;
-
-
-            System.out.println(
-                    "OBSTACLE CONFIRMED"
-            );
 
 
             return;
@@ -568,37 +655,19 @@ public class NavigateOneMeter extends CommandBase
                 lidar.getRightDistance();
 
 
-        System.out.println(
-                "LEFT = "
-                + left
-        );
-
-
-        System.out.println(
-                "RIGHT = "
-                + right
-        );
-
-
-        if (right > left)
+        if (
+            right
+            >
+            left
+        )
         {
             crabDirection =
                     RIGHT_X_SIGN;
-
-
-            System.out.println(
-                    "AVOID RIGHT"
-            );
         }
         else
         {
             crabDirection =
                     -RIGHT_X_SIGN;
-
-
-            System.out.println(
-                    "AVOID LEFT"
-            );
         }
     }
 
@@ -614,6 +683,10 @@ public class NavigateOneMeter extends CommandBase
                         .getAverageStrafeEncoderDistance();
 
 
+        /*
+         * Distance moved during this current
+         * crab section.
+         */
         double crabDistance =
                 Math.abs(
                         currentStrafe
@@ -622,12 +695,30 @@ public class NavigateOneMeter extends CommandBase
                 );
 
 
+        /*
+         * Total actual sideways distance
+         * from original track.
+         */
+        double totalDistanceFromTrack =
+                Math.abs(
+                        currentStrafe
+                        -
+                        originalTrackEncoder
+                );
+
+
+        SmartDashboard.putNumber(
+                "Distance From Original Track",
+                totalDistanceFromTrack
+        );
+
+
         // =================================================
         // MAXIMUM CRAB SAFETY
         // =================================================
 
         if (
-            crabDistance
+            totalDistanceFromTrack
             >=
             MAX_CRAB_DISTANCE
         )
@@ -639,12 +730,45 @@ public class NavigateOneMeter extends CommandBase
                     State.FAILED;
 
 
-            System.out.println(
-                    "CRAB LIMIT REACHED"
-            );
-
-
             return;
+        }
+
+
+        // =================================================
+        // LEARN STRAFE ENCODER DIRECTION
+        // =================================================
+
+        /*
+         * Once robot has moved enough sideways,
+         * determine which way encoder changes
+         * for the current crab command.
+         */
+        double encoderChange =
+                currentStrafe
+                -
+                crabStartEncoder;
+
+
+        if (
+            Math.abs(encoderChange)
+            >
+            20.0
+        )
+        {
+            /*
+             * Example:
+             *
+             * crabDirection = +1
+             * encoderChange = -100
+             *
+             * sign(-100) * +1 = -1
+             */
+            strafeEncoderDirection =
+                    Math.signum(
+                            encoderChange
+                    )
+                    *
+                    crabDirection;
         }
 
 
@@ -662,11 +786,6 @@ public class NavigateOneMeter extends CommandBase
                 front == 9999.0;
 
 
-        /*
-         * IMPORTANT:
-         *
-         * Must move AT LEAST 300 mm sideways.
-         */
         if (
             crabDistance
             >=
@@ -685,7 +804,7 @@ public class NavigateOneMeter extends CommandBase
 
 
         // =================================================
-        // READY TO GO FORWARD
+        // READY TO PASS OBSTACLE
         // =================================================
 
         if (
@@ -697,8 +816,12 @@ public class NavigateOneMeter extends CommandBase
             stopRobot();
 
 
+            /*
+             * Store total displacement from
+             * original track.
+             */
             crabOutDistance =
-                    crabDistance;
+                    totalDistanceFromTrack;
 
 
             passStartForward =
@@ -713,19 +836,12 @@ public class NavigateOneMeter extends CommandBase
                     0;
 
 
+            frontClearCounter =
+                    0;
+
+
             state =
                     State.PASS_OBSTACLE;
-
-
-            System.out.println(
-                    "CRAB OUT COMPLETE"
-            );
-
-
-            System.out.println(
-                    "CRAB DISTANCE = "
-                    + crabOutDistance
-            );
 
 
             return;
@@ -733,7 +849,7 @@ public class NavigateOneMeter extends CommandBase
 
 
         // =================================================
-        // YOUR WORKING CRAB
+        // WORKING CRAB
         // =================================================
 
         drive.holonomicDrive(
@@ -767,7 +883,7 @@ public class NavigateOneMeter extends CommandBase
 
 
         // =================================================
-        // FRONT SAFETY
+        // CHECK FRONT
         // =================================================
 
         double front =
@@ -791,10 +907,10 @@ public class NavigateOneMeter extends CommandBase
         }
 
 
-        /*
-         * If still blocked ahead,
-         * move farther sideways.
-         */
+        // =================================================
+        // NEED TO CRAB FARTHER
+        // =================================================
+
         if (
             obstacleCounter
             >=
@@ -804,6 +920,15 @@ public class NavigateOneMeter extends CommandBase
             stopRobot();
 
 
+            /*
+             * IMPORTANT:
+             *
+             * Only update crabStartEncoder.
+             *
+             * DO NOT update originalTrackEncoder.
+             *
+             * We are still avoiding the same obstacle.
+             */
             crabStartEncoder =
                     drive
                             .getAverageStrafeEncoderDistance();
@@ -821,17 +946,12 @@ public class NavigateOneMeter extends CommandBase
                     State.CRAB_OUT;
 
 
-            System.out.println(
-                    "FRONT BLOCKED - CRAB FARTHER"
-            );
-
-
             return;
         }
 
 
         // =================================================
-        // FIND OBSTACLE ON SIDE
+        // CHECK OBSTACLE SIDE
         // =================================================
 
         double sideDistance;
@@ -844,9 +964,8 @@ public class NavigateOneMeter extends CommandBase
         )
         {
             /*
-             * Robot went right.
-             *
-             * Obstacle is on left.
+             * Robot moved right,
+             * so obstacle is on the left.
              */
             sideDistance =
                     lidar.getLeftDistance();
@@ -854,9 +973,8 @@ public class NavigateOneMeter extends CommandBase
         else
         {
             /*
-             * Robot went left.
-             *
-             * Obstacle is on right.
+             * Robot moved left,
+             * so obstacle is on the right.
              */
             sideDistance =
                     lidar.getRightDistance();
@@ -891,8 +1009,7 @@ public class NavigateOneMeter extends CommandBase
 
 
         // =================================================
-        // IMPORTANT:
-        // DO NOT CRAB BACK YET
+        // START EXTRA BODY CLEARANCE
         // =================================================
 
         if (
@@ -901,15 +1018,6 @@ public class NavigateOneMeter extends CommandBase
             CLEAR_CONFIRM_LOOPS
         )
         {
-            /*
-             * Obstacle has disappeared from side,
-             * BUT the rear wheel might still be
-             * close to it.
-             *
-             * So start another straight-forward
-             * clearance section.
-             */
-
             clearanceStartForward =
                     currentForward;
 
@@ -918,18 +1026,12 @@ public class NavigateOneMeter extends CommandBase
                     0;
 
 
+            obstacleCounter =
+                    0;
+
+
             state =
                     State.CLEARANCE_FORWARD;
-
-
-            System.out.println(
-                    "SIDE CLEAR"
-            );
-
-
-            System.out.println(
-                    "NOW ADDING EXTRA BODY CLEARANCE"
-            );
 
 
             return;
@@ -937,7 +1039,7 @@ public class NavigateOneMeter extends CommandBase
 
 
         // =================================================
-        // KEEP FORWARD
+        // KEEP STRAIGHT
         // =================================================
 
         drive.holonomicDrive(
@@ -965,7 +1067,7 @@ public class NavigateOneMeter extends CommandBase
 
 
         // =================================================
-        // STILL CHECK FRONT
+        // CHECK FRONT
         // =================================================
 
         double front =
@@ -979,14 +1081,17 @@ public class NavigateOneMeter extends CommandBase
 
 
         /*
-         * Don't drive into another obstacle
-         * while doing the clearance movement.
+         * Another obstacle appeared.
          */
         if (frontBlocked)
         {
             stopRobot();
 
 
+            /*
+             * Again:
+             * keep originalTrackEncoder unchanged.
+             */
             crabStartEncoder =
                     drive
                             .getAverageStrafeEncoderDistance();
@@ -996,13 +1101,12 @@ public class NavigateOneMeter extends CommandBase
                     0;
 
 
+            obstacleCounter =
+                    0;
+
+
             state =
                     State.CRAB_OUT;
-
-
-            System.out.println(
-                    "NEW FRONT OBSTACLE"
-            );
 
 
             return;
@@ -1010,7 +1114,7 @@ public class NavigateOneMeter extends CommandBase
 
 
         // =================================================
-        // EXTRA 250 mm COMPLETED
+        // ENOUGH CLEARANCE
         // =================================================
 
         if (
@@ -1022,23 +1126,21 @@ public class NavigateOneMeter extends CommandBase
             stopRobot();
 
 
-            crabReturnStartEncoder =
-                    drive
-                            .getAverageStrafeEncoderDistance();
+            /*
+             * Recalculate actual distance from
+             * original track immediately before return.
+             */
+            crabOutDistance =
+                    Math.abs(
+                            drive
+                                    .getAverageStrafeEncoderDistance()
+                            -
+                            originalTrackEncoder
+                    );
 
 
             state =
                     State.CRAB_BACK;
-
-
-            System.out.println(
-                    "BODY CLEARANCE COMPLETE"
-            );
-
-
-            System.out.println(
-                    "NOW CRAB BACK"
-            );
 
 
             return;
@@ -1068,55 +1170,55 @@ public class NavigateOneMeter extends CommandBase
                         .getAverageStrafeEncoderDistance();
 
 
-        double returned =
+        // =================================================
+        // CALCULATE ERROR TO ORIGINAL TRACK
+        // =================================================
+
+        /*
+         * Example:
+         *
+         * Original = 0
+         * Current  = -350
+         *
+         * Error = +350
+         *
+         * Therefore encoder needs to increase.
+         */
+        double encoderError =
+                originalTrackEncoder
+                -
+                currentStrafe;
+
+
+        double distanceFromTrack =
                 Math.abs(
-                        currentStrafe
-                        -
-                        crabReturnStartEncoder
+                        encoderError
                 );
 
 
+        SmartDashboard.putNumber(
+                "Return Error",
+                encoderError
+        );
+
+
+        SmartDashboard.putNumber(
+                "Return Distance From Track",
+                distanceFromTrack
+        );
+
+
         // =================================================
-        // BACK TO TRACK
+        // ORIGINAL TRACK REACHED
         // =================================================
 
         if (
-            returned
-            >=
-            crabOutDistance
-            -
-            10.0
+            distanceFromTrack
+            <=
+            RETURN_TOLERANCE
         )
         {
-            stopRobot();
-
-
-            state =
-                    State.FORWARD;
-
-
-            obstacleCounter =
-                    0;
-
-            frontClearCounter =
-                    0;
-
-            sideClearCounter =
-                    0;
-
-
-            headingPID.reset();
-
-
-            ignoreObstacleUntil =
-                    timer.get()
-                    +
-                    0.75;
-
-
-            System.out.println(
-                    "BACK ON ORIGINAL TRACK"
-            );
+            finishReturn();
 
 
             return;
@@ -1124,24 +1226,140 @@ public class NavigateOneMeter extends CommandBase
 
 
         // =================================================
-        // REVERSE CRAB
+        // DETERMINE CORRECT MOTOR DIRECTION
         // =================================================
 
-        int returnDirection =
-                -crabDirection;
+        /*
+         * THIS is the important fix.
+         *
+         * We don't simply use:
+         *
+         * returnDirection = -crabDirection
+         *
+         * We calculate which crab command will make
+         * the strafe encoder move toward home.
+         */
 
+        int returnDirection;
+
+
+        if (
+            encoderError
+            *
+            strafeEncoderDirection
+            >
+            0.0
+        )
+        {
+            returnDirection =
+                    1;
+        }
+        else
+        {
+            returnDirection =
+                    -1;
+        }
+
+
+        SmartDashboard.putNumber(
+                "Return Direction",
+                returnDirection
+        );
+
+
+        // =================================================
+        // SLOW NEAR ORIGINAL TRACK
+        // =================================================
+
+        double returnSpeed;
+
+
+        if (
+            distanceFromTrack
+            <=
+            RETURN_SLOW_ZONE
+        )
+        {
+            returnSpeed =
+                    RETURN_SLOW_SPEED;
+        }
+        else
+        {
+            returnSpeed =
+                    CRAB_SPEED;
+        }
+
+
+        // =================================================
+        // CRAB CORRECTION
+        // =================================================
+
+        double correctionScale =
+                returnSpeed
+                /
+                CRAB_SPEED;
+
+
+        double returnCorrection =
+                -CRAB_CORRECTION
+                *
+                returnDirection
+                *
+                correctionScale;
+
+
+        // =================================================
+        // MOVE TOWARD HOME
+        // =================================================
 
         drive.holonomicDrive(
-                CRAB_SPEED
+                returnSpeed
                         *
                         returnDirection,
 
                 0.0,
 
-                -CRAB_CORRECTION
-                        *
-                        returnDirection
+                returnCorrection
         );
+    }
+
+
+    // =====================================================
+    // RETURN COMPLETE
+    // =====================================================
+
+    private void finishReturn()
+    {
+        stopRobot();
+
+
+        state =
+                State.FORWARD;
+
+
+        obstacleCounter =
+                0;
+
+
+        frontClearCounter =
+                0;
+
+
+        sideClearCounter =
+                0;
+
+
+        headingPID.reset();
+
+
+        /*
+         * Short cooldown so the same obstacle
+         * does not immediately trigger again.
+         */
+        ignoreObstacleUntil =
+                timer.get()
+                +
+                0.75;
     }
 
 
@@ -1216,11 +1434,6 @@ public class NavigateOneMeter extends CommandBase
             TOTAL_TIMEOUT
         )
         {
-            System.out.println(
-                    "NAVIGATION TIMEOUT"
-            );
-
-
             return true;
         }
 
@@ -1241,33 +1454,5 @@ public class NavigateOneMeter extends CommandBase
 
 
         stopRobot();
-
-
-        System.out.println(
-                "================================"
-        );
-
-
-        System.out.println(
-                "NAVIGATION END"
-        );
-
-
-        System.out.println(
-                "FORWARD DISTANCE = "
-                + getForwardDistance()
-                + " mm"
-        );
-
-
-        System.out.println(
-                "YAW = "
-                + drive.getYaw()
-        );
-
-
-        System.out.println(
-                "================================"
-        );
     }
 }
