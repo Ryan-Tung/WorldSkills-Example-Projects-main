@@ -1,12 +1,14 @@
 package frc.robot.commands;
 
 import edu.wpi.first.wpilibj.controller.PIDController;
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.CommandBase;
 import edu.wpi.first.wpiutil.math.MathUtil;
 
 import frc.robot.RobotContainer;
 import frc.robot.subsystems.DriveTrain;
 import frc.robot.subsystems.CobraTest;
+
 
 public class DriveUntilBlack extends CommandBase
 {
@@ -15,6 +17,15 @@ public class DriveUntilBlack extends CommandBase
 
     private static final CobraTest cobra =
             RobotContainer.cobra;
+
+
+    // =====================================================
+    // TARGET DISTANCE
+    // =====================================================
+
+    // 2000 mm = 2 metres
+    private static final double TARGET_DISTANCE_MM =
+            2000.0;
 
 
     // =====================================================
@@ -39,11 +50,14 @@ public class DriveUntilBlack extends CommandBase
 
 
     // =====================================================
-    // TAPE DETECTED
+    // VARIABLES
     // =====================================================
 
-    private boolean tapeDetected =
+    private boolean finished =
             false;
+
+    private double startDistance =
+            0.0;
 
 
     // =====================================================
@@ -79,12 +93,33 @@ public class DriveUntilBlack extends CommandBase
     @Override
     public void initialize()
     {
+        // Reset robot pose / encoders
         drive.resetPose();
 
+
+        // Reset heading PID
         headingPID.reset();
 
-        tapeDetected =
+
+        // Record starting forward position
+        startDistance =
+                drive.getAverageForwardEncoderDistance();
+
+
+        finished =
                 false;
+
+
+        SmartDashboard.putString(
+                "Cobra Drive State",
+                "MOVING"
+        );
+
+
+        SmartDashboard.putNumber(
+                "Cobra Target Distance",
+                TARGET_DISTANCE_MM
+        );
     }
 
 
@@ -96,15 +131,41 @@ public class DriveUntilBlack extends CommandBase
     public void execute()
     {
         // =================================================
-        // BLACK TAPE DETECTED
+        // CALCULATE DISTANCE TRAVELLED
         // =================================================
 
-        if (
-            cobra.blackTapeDetected()
-        )
+        double currentDistance =
+                drive.getAverageForwardEncoderDistance();
+
+
+        double distanceTravelled =
+                Math.abs(
+                        currentDistance
+                        -
+                        startDistance
+                );
+
+
+        SmartDashboard.putNumber(
+                "Cobra Distance Travelled",
+                distanceTravelled
+        );
+
+
+        // =================================================
+        // STOP IF BLACK TAPE IS DETECTED
+        // =================================================
+
+        if (cobra.blackTapeDetected())
         {
-            tapeDetected =
+            finished =
                     true;
+
+
+            SmartDashboard.putString(
+                    "Cobra Drive State",
+                    "BLACK TAPE DETECTED"
+            );
 
 
             stopRobot();
@@ -115,12 +176,43 @@ public class DriveUntilBlack extends CommandBase
 
 
         // =================================================
-        // KEEP ROBOT STRAIGHT
+        // STOP AT 2000 MM
         // =================================================
+
+        if (
+            distanceTravelled
+            >=
+            TARGET_DISTANCE_MM
+        )
+        {
+            finished =
+                    true;
+
+
+            SmartDashboard.putString(
+                    "Cobra Drive State",
+                    "2000 MM REACHED"
+            );
+
+
+            stopRobot();
+
+
+            return;
+        }
+
+
+        // =================================================
+        // HEADING CORRECTION
+        // =================================================
+
+        double yaw =
+                drive.getYaw();
+
 
         double correction =
                 headingPID.calculate(
-                        drive.getYaw(),
+                        yaw,
                         0.0
                 );
 
@@ -131,6 +223,34 @@ public class DriveUntilBlack extends CommandBase
                         -MAX_HEADING_CORRECTION,
                         MAX_HEADING_CORRECTION
                 );
+
+
+        // =================================================
+        // DEBUG VALUES
+        // =================================================
+
+        SmartDashboard.putNumber(
+                "Cobra Drive Yaw",
+                yaw
+        );
+
+
+        SmartDashboard.putNumber(
+                "Cobra Heading Correction",
+                correction
+        );
+
+
+        SmartDashboard.putNumber(
+                "Cobra Forward Speed",
+                FORWARD_SPEED
+        );
+
+
+        SmartDashboard.putBoolean(
+                "Cobra Tape Detected",
+                false
+        );
 
 
         // =================================================
@@ -146,13 +266,13 @@ public class DriveUntilBlack extends CommandBase
 
 
     // =====================================================
-    // FINISHED
+    // FINISHED?
     // =====================================================
 
     @Override
     public boolean isFinished()
     {
-        return tapeDetected;
+        return finished;
     }
 
 
@@ -165,6 +285,15 @@ public class DriveUntilBlack extends CommandBase
             boolean interrupted)
     {
         stopRobot();
+
+
+        if (interrupted)
+        {
+            SmartDashboard.putString(
+                    "Cobra Drive State",
+                    "INTERRUPTED"
+            );
+        }
     }
 
 

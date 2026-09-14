@@ -1,13 +1,20 @@
 package frc.robot;
 
 import edu.wpi.first.wpilibj.TimedRobot;
+
+import edu.wpi.first.wpilibj.shuffleboard.BuiltInWidgets;
+import edu.wpi.first.wpilibj.shuffleboard.Shuffleboard;
+
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
+
 import edu.wpi.first.wpilibj2.command.CommandBase;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
 
 import frc.robot.commands.NavigateOneMeter;
 import frc.robot.commands.DriveUntilBlack;
+import frc.robot.commands.LocalizationMonitor;
+
 
 public class Robot extends TimedRobot
 {
@@ -26,13 +33,14 @@ public class Robot extends TimedRobot
 
 
         // =================================================
-        // DEFAULT MODE
+        // DEFAULT MODE - LIDAR MOVING
         // =================================================
 
         RobotContainer.autoChooser.setDefaultOption(
                 "LIDAR_MOVING",
                 "LIDAR_MOVING"
         );
+
 
         RobotContainer.autoMode.put(
                 "LIDAR_MOVING",
@@ -41,7 +49,7 @@ public class Robot extends TimedRobot
 
 
         // =================================================
-        // ADD OTHER MODES
+        // COBRA MODE
         // =================================================
 
         addAutoMode(
@@ -52,12 +60,38 @@ public class Robot extends TimedRobot
 
 
         // =================================================
-        // SHOW CHOOSER ON SHUFFLEBOARD
+        // LIDAR LOCALIZATION MODE
         // =================================================
 
-        SmartDashboard.putData(
-                "Robot Mode",
-                RobotContainer.autoChooser
+        addAutoMode(
+                RobotContainer.autoChooser,
+                "LIDAR_LOCALIZATION",
+                new LocalizationMonitor()
+        );
+
+
+        // =================================================
+        // SHUFFLEBOARD MODE CHOOSER
+        // =================================================
+
+        Shuffleboard
+                .getTab("Training Robot")
+                .add(
+                        "Robot Mode",
+                        RobotContainer.autoChooser
+                )
+                .withWidget(
+                        BuiltInWidgets.kComboBoxChooser
+                );
+
+
+        // =================================================
+        // DEBUG SELECTED MODE
+        // =================================================
+
+        SmartDashboard.putString(
+                "Selected Robot Mode",
+                "LIDAR_MOVING"
         );
     }
 
@@ -76,6 +110,7 @@ public class Robot extends TimedRobot
                 auto
         );
 
+
         RobotContainer.autoMode.put(
                 auto,
                 cmd
@@ -93,6 +128,21 @@ public class Robot extends TimedRobot
         CommandScheduler
                 .getInstance()
                 .run();
+
+
+        // Show currently selected mode
+        String selectedMode =
+                RobotContainer.autoChooser
+                        .getSelected();
+
+
+        if (selectedMode != null)
+        {
+            SmartDashboard.putString(
+                    "Selected Robot Mode",
+                    selectedMode
+            );
+        }
     }
 
 
@@ -146,15 +196,42 @@ public class Robot extends TimedRobot
     @Override
     public void teleopInit()
     {
+        // Cancel previously running command
         CommandScheduler
                 .getInstance()
                 .cancelAll();
 
 
+        // =================================================
+        // GET SELECTED MODE
+        // =================================================
+
         String selectedMode =
                 RobotContainer.autoChooser
                         .getSelected();
 
+
+        // Safety fallback
+        if (selectedMode == null)
+        {
+            selectedMode =
+                    "LIDAR_MOVING";
+        }
+
+
+        // =================================================
+        // SHOW SELECTED MODE
+        // =================================================
+
+        SmartDashboard.putString(
+                "Selected Robot Mode",
+                selectedMode
+        );
+
+
+        // =================================================
+        // GET COMMAND
+        // =================================================
 
         CommandBase selectedCommand =
                 RobotContainer.autoMode
@@ -163,9 +240,23 @@ public class Robot extends TimedRobot
                         );
 
 
+        // =================================================
+        // RUN COMMAND
+        // =================================================
+
         if (selectedCommand != null)
         {
             selectedCommand.schedule();
+        }
+        else
+        {
+            // Safety stop
+            RobotContainer.driveTrain
+                    .holonomicDrive(
+                            0.0,
+                            0.0,
+                            0.0
+                    );
         }
     }
 

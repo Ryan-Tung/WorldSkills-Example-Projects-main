@@ -561,16 +561,31 @@ public class DriveTrain extends SubsystemBase
 
     // =====================================================
     // RESET YAW
+    // DISABLED
     // =====================================================
 
     public void resetYaw()
     {
-        yawOffset =
-                navx.getYaw();
+        /*
+         * RESET YAW DISABLED.
+         *
+         * Original code:
+         *
+         * yawOffset =
+         *         navx.getYaw();
+         *
+         * yawReferenceSet =
+         *         true;
+         *
+         * Keeping this method so other commands that call
+         * resetYaw() will still compile.
+         */
 
+        // yawOffset =
+        //         navx.getYaw();
 
-        yawReferenceSet =
-                true;
+        // yawReferenceSet =
+        //         true;
     }
 
 
@@ -636,6 +651,8 @@ public class DriveTrain extends SubsystemBase
 
 
         resetEncoders();
+
+        // resetYaw() is now disabled.
         resetYaw();
     }
 

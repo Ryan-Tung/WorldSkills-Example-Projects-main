@@ -8,8 +8,10 @@ import edu.wpi.first.wpilibj2.command.CommandBase;
 import frc.robot.subsystems.DriveTrain;
 import frc.robot.subsystems.LidarTest;
 import frc.robot.subsystems.CobraTest;
+import frc.robot.subsystems.LidarLocalization;
 
 import frc.robot.gamepad.OI;
+
 
 public class RobotContainer
 {
@@ -20,21 +22,33 @@ public class RobotContainer
     public static final DriveTrain driveTrain =
             new DriveTrain();
 
+
     public static final LidarTest lidar =
             new LidarTest();
 
+
     public static final CobraTest cobra =
             new CobraTest();
+
+
+    public static final LidarLocalization lidarLocalization =
+            new LidarLocalization();
+
+
+    // =====================================================
+    // OPERATOR INTERFACE
+    // =====================================================
 
     public static OI oi;
 
 
     // =====================================================
-    // AUTO / MODE CHOOSER
+    // MODE CHOOSER
     // =====================================================
 
     public static SendableChooser<String> autoChooser =
             new SendableChooser<String>();
+
 
     public static HashMap<String, CommandBase> autoMode =
             new HashMap<String, CommandBase>();
@@ -46,24 +60,30 @@ public class RobotContainer
 
     public RobotContainer()
     {
-        oi = new OI();
+        oi =
+                new OI();
+
 
         /*
-         * IMPORTANT:
+         * LidarTest already starts the LiDAR.
          *
          * Do NOT use:
          *
          * lidar.setDefaultCommand(new StartStop());
-         *
-         * LidarTest already starts the LiDAR by itself.
          */
 
 
         /*
-         * CobraTest is also initialized automatically
-         * when RobotContainer is created.
+         * CobraTest is initialized automatically.
+         */
+
+
+        /*
+         * LidarLocalization is also initialized
+         * automatically.
          *
-         * You do not need to start it manually here.
+         * It reads localization values from
+         * NetworkTables that will be sent by Python.
          */
     }
 }

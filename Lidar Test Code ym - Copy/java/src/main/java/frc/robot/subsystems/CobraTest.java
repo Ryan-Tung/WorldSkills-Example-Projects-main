@@ -11,35 +11,11 @@ public class CobraTest extends SubsystemBase
 
 
     // =====================================================
-    // BLACK TAPE THRESHOLD
+    // BLACK TAPE VOLTAGE THRESHOLD
     // =====================================================
 
-    /*
-     * TEMPORARY VALUE.
-     *
-     * First look at the readings on Shuffleboard
-     * for:
-     *
-     * 1. normal floor
-     * 2. black tape
-     *
-     * Then we will set this properly.
-     */
-    private static final double BLACK_THRESHOLD =
-            1000.0;
-
-
-    /*
-     * Depending on your floor/tape,
-     * black may give HIGHER or LOWER values.
-     *
-     * Start with true.
-     *
-     * After testing, change to false if black
-     * gives a LOWER number than the normal floor.
-     */
-    private static final boolean BLACK_IS_HIGH =
-            true;
+    private static final double BLACK_VOLTAGE_THRESHOLD =
+            2.0;
 
 
     // =====================================================
@@ -54,7 +30,7 @@ public class CobraTest extends SubsystemBase
 
 
     // =====================================================
-    // RAW VALUES
+    // RAW SENSOR VALUES
     // =====================================================
 
     public double getSensor0()
@@ -82,24 +58,43 @@ public class CobraTest extends SubsystemBase
 
 
     // =====================================================
-    // CHECK ONE SENSOR FOR BLACK
+    // VOLTAGE VALUES
     // =====================================================
 
-    private boolean isBlack(
-            double value)
+    public double getVoltage0()
     {
-        if (BLACK_IS_HIGH)
-        {
-            return value
-                    >=
-                    BLACK_THRESHOLD;
-        }
-        else
-        {
-            return value
-                    <=
-                    BLACK_THRESHOLD;
-        }
+        return cobra.getVoltage(0);
+    }
+
+
+    public double getVoltage1()
+    {
+        return cobra.getVoltage(1);
+    }
+
+
+    public double getVoltage2()
+    {
+        return cobra.getVoltage(2);
+    }
+
+
+    public double getVoltage3()
+    {
+        return cobra.getVoltage(3);
+    }
+
+
+    // =====================================================
+    // CHECK ONE SENSOR
+    // =====================================================
+
+    private boolean isBlackVoltage(
+            double voltage)
+    {
+        return voltage
+                <
+                BLACK_VOLTAGE_THRESHOLD;
     }
 
 
@@ -109,14 +104,27 @@ public class CobraTest extends SubsystemBase
 
     public boolean blackTapeDetected()
     {
+        double voltage0 =
+                getVoltage0();
+
+        double voltage1 =
+                getVoltage1();
+
+        double voltage2 =
+                getVoltage2();
+
+        double voltage3 =
+                getVoltage3();
+
+
         return
-                isBlack(getSensor0())
+                isBlackVoltage(voltage0)
                 ||
-                isBlack(getSensor1())
+                isBlackVoltage(voltage1)
                 ||
-                isBlack(getSensor2())
+                isBlackVoltage(voltage2)
                 ||
-                isBlack(getSensor3());
+                isBlackVoltage(voltage3);
     }
 
 
@@ -127,33 +135,117 @@ public class CobraTest extends SubsystemBase
     @Override
     public void periodic()
     {
+        // =================================================
+        // READ RAW VALUES
+        // =================================================
+
+        double sensor0 =
+                getSensor0();
+
+        double sensor1 =
+                getSensor1();
+
+        double sensor2 =
+                getSensor2();
+
+        double sensor3 =
+                getSensor3();
+
+
+        // =================================================
+        // READ VOLTAGES
+        // =================================================
+
+        double voltage0 =
+                getVoltage0();
+
+        double voltage1 =
+                getVoltage1();
+
+        double voltage2 =
+                getVoltage2();
+
+        double voltage3 =
+                getVoltage3();
+
+
+        // =================================================
+        // CHECK BLACK TAPE
+        // =================================================
+
+        boolean blackDetected =
+                isBlackVoltage(voltage0)
+                ||
+                isBlackVoltage(voltage1)
+                ||
+                isBlackVoltage(voltage2)
+                ||
+                isBlackVoltage(voltage3);
+
+
+        // =================================================
+        // RAW VALUES
+        // =================================================
+
         SmartDashboard.putNumber(
                 "Cobra 0",
-                getSensor0()
+                sensor0
         );
 
 
         SmartDashboard.putNumber(
                 "Cobra 1",
-                getSensor1()
+                sensor1
         );
 
 
         SmartDashboard.putNumber(
                 "Cobra 2",
-                getSensor2()
+                sensor2
         );
 
 
         SmartDashboard.putNumber(
                 "Cobra 3",
-                getSensor3()
+                sensor3
         );
 
 
+        // =================================================
+        // VOLTAGE VALUES
+        // =================================================
+
+        SmartDashboard.putNumber(
+                "Cobra V0",
+                voltage0
+        );
+
+
+        SmartDashboard.putNumber(
+                "Cobra V1",
+                voltage1
+        );
+
+
+        SmartDashboard.putNumber(
+                "Cobra V2",
+                voltage2
+        );
+
+
+        SmartDashboard.putNumber(
+                "Cobra V3",
+                voltage3
+        );
+
+
+        // =================================================
+        // BLACK TAPE STATUS
+        // =================================================
+
         SmartDashboard.putBoolean(
                 "Black Tape",
-                blackTapeDetected()
+                blackDetected
         );
     }
 }
