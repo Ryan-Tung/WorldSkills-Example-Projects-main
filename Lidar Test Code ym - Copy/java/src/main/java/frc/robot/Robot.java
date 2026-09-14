@@ -14,11 +14,16 @@ import edu.wpi.first.wpilibj2.command.CommandScheduler;
 import frc.robot.commands.NavigateOneMeter;
 import frc.robot.commands.DriveUntilBlack;
 import frc.robot.commands.LocalizationMonitor;
+import frc.robot.commands.KeyboardDrive;
 
 
 public class Robot extends TimedRobot
 {
-    private RobotContainer robotContainer;
+    // =====================================================
+    // CURRENT SELECTED COMMAND
+    // =====================================================
+
+    private CommandBase selectedCommand;
 
 
     // =====================================================
@@ -28,18 +33,22 @@ public class Robot extends TimedRobot
     @Override
     public void robotInit()
     {
-        robotContainer =
-                new RobotContainer();
+        // =================================================
+        // CREATE ROBOT CONTAINER
+        // =================================================
+
+        new RobotContainer();
 
 
         // =================================================
-        // DEFAULT MODE - LIDAR MOVING
+        // DEFAULT MODE
         // =================================================
 
-        RobotContainer.autoChooser.setDefaultOption(
-                "LIDAR_MOVING",
-                "LIDAR_MOVING"
-        );
+        RobotContainer.autoChooser
+                .setDefaultOption(
+                        "LIDAR_MOVING",
+                        "LIDAR_MOVING"
+                );
 
 
         RobotContainer.autoMode.put(
@@ -71,7 +80,18 @@ public class Robot extends TimedRobot
 
 
         // =================================================
-        // SHUFFLEBOARD MODE CHOOSER
+        // KEYBOARD DRIVE MODE
+        // =================================================
+
+        addAutoMode(
+                RobotContainer.autoChooser,
+                "KEYBOARD_DRIVE",
+                new KeyboardDrive()
+        );
+
+
+        // =================================================
+        // SHUFFLEBOARD MODE SELECTOR
         // =================================================
 
         Shuffleboard
@@ -86,18 +106,24 @@ public class Robot extends TimedRobot
 
 
         // =================================================
-        // DEBUG SELECTED MODE
+        // DASHBOARD
         // =================================================
 
         SmartDashboard.putString(
                 "Selected Robot Mode",
                 "LIDAR_MOVING"
         );
+
+
+        SmartDashboard.putString(
+                "Keyboard Drive State",
+                "STOPPED"
+        );
     }
 
 
     // =====================================================
-    // ADD AUTO MODE
+    // ADD MODE HELPER
     // =====================================================
 
     public void addAutoMode(
@@ -125,33 +151,84 @@ public class Robot extends TimedRobot
     @Override
     public void robotPeriodic()
     {
+        // Run commands
         CommandScheduler
                 .getInstance()
                 .run();
 
 
-        // Show currently selected mode
-        String selectedMode =
+        // =================================================
+        // SHOW SELECTED MODE
+        // =================================================
+
+        String selected =
                 RobotContainer.autoChooser
                         .getSelected();
 
 
-        if (selectedMode != null)
+        if (selected == null)
         {
-            SmartDashboard.putString(
-                    "Selected Robot Mode",
-                    selectedMode
-            );
+            selected =
+                    "LIDAR_MOVING";
         }
+
+
+        SmartDashboard.putString(
+                "Selected Robot Mode",
+                selected
+        );
     }
 
 
     // =====================================================
-    // DISABLED
+    // DISABLED INIT
     // =====================================================
 
     @Override
     public void disabledInit()
+    {
+        // Cancel running command
+        CommandScheduler
+                .getInstance()
+                .cancelAll();
+
+
+        selectedCommand =
+                null;
+
+
+        // Stop drivetrain
+        RobotContainer.driveTrain
+                .holonomicDrive(
+                        0.0,
+                        0.0,
+                        0.0
+                );
+
+
+        SmartDashboard.putString(
+                "Keyboard Drive State",
+                "STOPPED"
+        );
+    }
+
+
+    // =====================================================
+    // DISABLED PERIODIC
+    // =====================================================
+
+    @Override
+    public void disabledPeriodic()
+    {
+    }
+
+
+    // =====================================================
+    // AUTONOMOUS INIT
+    // =====================================================
+
+    @Override
+    public void autonomousInit()
     {
         CommandScheduler
                 .getInstance()
@@ -167,21 +244,9 @@ public class Robot extends TimedRobot
     }
 
 
-    @Override
-    public void disabledPeriodic()
-    {
-    }
-
-
     // =====================================================
-    // AUTONOMOUS
+    // AUTONOMOUS PERIODIC
     // =====================================================
-
-    @Override
-    public void autonomousInit()
-    {
-    }
-
 
     @Override
     public void autonomousPeriodic()
@@ -190,20 +255,23 @@ public class Robot extends TimedRobot
 
 
     // =====================================================
-    // TELEOP
+    // TELEOP INIT
     // =====================================================
 
     @Override
     public void teleopInit()
     {
-        // Cancel previously running command
+        // =================================================
+        // CANCEL PREVIOUS COMMAND
+        // =================================================
+
         CommandScheduler
                 .getInstance()
                 .cancelAll();
 
 
         // =================================================
-        // GET SELECTED MODE
+        // GET SELECTED SHUFFLEBOARD MODE
         // =================================================
 
         String selectedMode =
@@ -211,7 +279,6 @@ public class Robot extends TimedRobot
                         .getSelected();
 
 
-        // Safety fallback
         if (selectedMode == null)
         {
             selectedMode =
@@ -220,24 +287,24 @@ public class Robot extends TimedRobot
 
 
         // =================================================
-        // SHOW SELECTED MODE
+        // GET COMMAND
+        // =================================================
+
+        selectedCommand =
+                RobotContainer.autoMode
+                        .get(
+                                selectedMode
+                        );
+
+
+        // =================================================
+        // SHOW MODE
         // =================================================
 
         SmartDashboard.putString(
                 "Selected Robot Mode",
                 selectedMode
         );
-
-
-        // =================================================
-        // GET COMMAND
-        // =================================================
-
-        CommandBase selectedCommand =
-                RobotContainer.autoMode
-                        .get(
-                                selectedMode
-                        );
 
 
         // =================================================
@@ -248,27 +315,27 @@ public class Robot extends TimedRobot
         {
             selectedCommand.schedule();
         }
-        else
-        {
-            // Safety stop
-            RobotContainer.driveTrain
-                    .holonomicDrive(
-                            0.0,
-                            0.0,
-                            0.0
-                    );
-        }
-    }
-
-
-    @Override
-    public void teleopPeriodic()
-    {
     }
 
 
     // =====================================================
-    // TEST
+    // TELEOP PERIODIC
+    // =====================================================
+
+    @Override
+    public void teleopPeriodic()
+    {
+        /*
+         * CommandScheduler runs in robotPeriodic().
+         *
+         * KEYBOARD_DRIVE will therefore continuously run
+         * KeyboardDrive.execute().
+         */
+    }
+
+
+    // =====================================================
+    // TEST INIT
     // =====================================================
 
     @Override
@@ -287,6 +354,10 @@ public class Robot extends TimedRobot
                 );
     }
 
+
+    // =====================================================
+    // TEST PERIODIC
+    // =====================================================
 
     @Override
     public void testPeriodic()

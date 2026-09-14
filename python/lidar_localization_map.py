@@ -49,10 +49,75 @@ os.makedirs(
 
 
 # ============================================================
+# POSITION LOG FILE
+#
+# A NEW LOG FILE IS CREATED EACH TIME THE PROGRAM STARTS.
+#
+# Example:
+#
+# map/position_log_20260914_121730.csv
+# ============================================================
+
+POSITION_LOG_TIMESTAMP = time.strftime(
+    "%Y%m%d_%H%M%S"
+)
+
+POSITION_LOG_FILE = os.path.join(
+    MAP_SAVE_FOLDER,
+    "position_log_"
+    +
+    POSITION_LOG_TIMESTAMP
+    +
+    ".csv"
+)
+
+
+# ============================================================
+# LOGGED POSITIONS
+# ============================================================
+
+logged_positions = []
+
+position_counter = 0
+
+
+# ============================================================
+# CREATE POSITION LOG FILE
+# ============================================================
+
+def create_position_log_file():
+
+    with open(
+        POSITION_LOG_FILE,
+        "w",
+        newline=""
+    ) as file:
+
+        writer = csv.writer(
+            file
+        )
+
+        writer.writerow(
+            [
+                "Position",
+                "X_m",
+                "Y_m",
+                "Heading_deg",
+                "Timestamp"
+            ]
+        )
+
+
+# Create it immediately.
+create_position_log_file()
+
+
+# ============================================================
 # LIDAR BASIC SETTINGS
 # ============================================================
 
 MIN_DISTANCE_MM = 120.0
+
 MAX_DISTANCE_MM = 5000.0
 
 MIN_SCAN_POINTS = 30
@@ -68,43 +133,38 @@ LIDAR_MOUNT_OFFSET_DEG = -20.0
 # ============================================================
 # BACK WALL DISTANCE CALIBRATION
 #
-# IMPORTANT:
+# Robot starting position:
 #
-# At PROGRAM START:
-#
-# LiDAR centre -> back wall = exactly 1.60 m
-#
-# Robot must remain stationary while this calibration runs.
-#
-# We inspect approximately:
-#
-# 175° -> 185°
-#
-# which is directly behind the robot after the -20° mounting
-# correction has already been applied.
+# LiDAR centre -> rear wall = exactly 1.60 m
 # ============================================================
 
 BACK_WALL_REFERENCE_DISTANCE_M = 1.60
 
 BACK_WALL_SECTOR_START_DEG = 175.0
+
 BACK_WALL_SECTOR_END_DEG = 185.0
 
 BACK_WALL_CALIBRATION_FRAMES = 25
 
 BACK_WALL_MIN_POINTS_PER_FRAME = 5
 
+
 MIN_ALLOWED_DISTANCE_SCALE = 0.70
+
 MAX_ALLOWED_DISTANCE_SCALE = 1.35
 
 
-# Starts uncalibrated.
 DISTANCE_SCALE_FACTOR = 1.0
+
 
 distance_calibrated = False
 
+
 back_wall_calibration_samples = []
 
+
 back_wall_raw_distance_m = 0.0
+
 
 back_wall_current_distance_m = 0.0
 
@@ -123,7 +183,7 @@ MIN_ICP_MATCHES = 25
 
 
 # ============================================================
-# ICP QUALITY CHECKS
+# ICP QUALITY SETTINGS
 # ============================================================
 
 MAX_ACCEPTED_ICP_ERROR_M = 0.08
@@ -145,7 +205,7 @@ KEYFRAME_ROTATION_DEG = 8.0
 
 
 # ============================================================
-# STATIONARY LOCK
+# STATIONARY LOCK SETTINGS
 # ============================================================
 
 STATIONARY_LOCK_TRANSLATION_M = 0.015
@@ -154,7 +214,7 @@ STATIONARY_LOCK_ROTATION_DEG = 0.50
 
 
 # ============================================================
-# LIVE FILTER SETTINGS
+# LIVE FILTER
 # ============================================================
 
 LIVE_CLUSTER_GAP_M = 0.20
@@ -165,7 +225,7 @@ MAX_LIVE_LABELS = 8
 
 
 # ============================================================
-# CONFIRMED MAP CLUSTER SETTINGS
+# MAP CLUSTER SETTINGS
 # ============================================================
 
 MAP_CLUSTER_DISTANCE_M = 0.24
@@ -176,7 +236,7 @@ MAX_MAP_LABELS = 10
 
 
 # ============================================================
-# DISPLAY POINT SIZE
+# DISPLAY POINT SIZES
 # ============================================================
 
 LIVE_POINT_SIZE = 12
@@ -184,6 +244,15 @@ LIVE_POINT_SIZE = 12
 MAP_POINT_SIZE = 10
 
 SAVED_MAP_POINT_SIZE = 10
+
+
+# ============================================================
+# LOGGED POSITION DISPLAY
+# ============================================================
+
+LOGGED_POSITION_POINT_SIZE = 60
+
+LOGGED_POSITION_LABEL_OFFSET_M = 0.12
 
 
 # ============================================================
@@ -219,10 +288,14 @@ DISPLAY_UPDATE_TIME_S = 0.05
 # ============================================================
 
 robot_x = 0.0
+
 robot_y = 0.0
+
 robot_heading = 0.0
 
+
 robot_rotation = np.eye(2)
+
 
 robot_translation = np.array(
     [0.0, 0.0],
@@ -236,12 +309,15 @@ robot_translation = np.array(
 
 keyframe_scan = None
 
+
 keyframe_rotation = np.eye(2)
+
 
 keyframe_translation = np.array(
     [0.0, 0.0],
     dtype=float
 )
+
 
 keyframe_number = 0
 
@@ -262,6 +338,13 @@ last_inlier_ratio = 0.0
 
 
 # ============================================================
+# POSITION LOG STATUS
+# ============================================================
+
+last_log_message = "No position logged yet"
+
+
+# ============================================================
 # OCCUPANCY GRID
 # ============================================================
 
@@ -273,12 +356,16 @@ occupancy_grid = {}
 # ============================================================
 
 live_view_center_x = 0.0
+
 live_view_center_y = 0.0
 
+
 map_min_x = -MAP_INITIAL_HALF_RANGE_M
+
 map_max_x = MAP_INITIAL_HALF_RANGE_M
 
 map_min_y = -MAP_INITIAL_HALF_RANGE_M
+
 map_max_y = MAP_INITIAL_HALF_RANGE_M
 
 
@@ -286,24 +373,34 @@ map_max_y = MAP_INITIAL_HALF_RANGE_M
 # ANGLE HELPERS
 # ============================================================
 
-def normalize_angle(angle_deg):
+def normalize_angle(
+        angle_deg):
 
     while angle_deg >= 360.0:
+
         angle_deg -= 360.0
 
+
     while angle_deg < 0.0:
+
         angle_deg += 360.0
+
 
     return angle_deg
 
 
-def normalize_heading(angle_deg):
+def normalize_heading(
+        angle_deg):
 
     while angle_deg > 180.0:
+
         angle_deg -= 360.0
 
+
     while angle_deg < -180.0:
+
         angle_deg += 360.0
+
 
     return angle_deg
 
@@ -321,6 +418,7 @@ def angle_inside_range(
             angle <= end_angle
         )
 
+
     return (
         angle >= start_angle
         or
@@ -330,21 +428,13 @@ def angle_inside_range(
 
 # ============================================================
 # PARSE RAW LIDAR
-#
-# IMPORTANT:
-#
-# Apply angle correction here.
-#
-# DO NOT apply distance scaling yet.
-#
-# We need the RAW LiDAR distance first so that the known
-# 1.60 m rear wall can calculate the scale automatically.
 # ============================================================
 
 def parse_scan_raw(
         scan_array):
 
     angles = []
+
     raw_distances = []
 
 
@@ -385,6 +475,7 @@ def parse_scan_raw(
             scan_array[i]
         )
 
+
         raw_distance_mm = float(
             scan_array[i + 1]
         )
@@ -402,9 +493,11 @@ def parse_scan_raw(
                 LIDAR_MOUNT_OFFSET_DEG
             )
 
+
             angles.append(
                 corrected_angle
             )
+
 
             raw_distances.append(
                 raw_distance_mm
@@ -418,7 +511,7 @@ def parse_scan_raw(
 
 
 # ============================================================
-# GET FULL RAW 360 SCAN
+# GET FULL RAW SCAN
 # ============================================================
 
 def get_full_raw_scan():
@@ -427,6 +520,7 @@ def get_full_raw_scan():
         "ScanA",
         []
     )
+
 
     scan_b = lidar_table.getNumberArray(
         "ScanB",
@@ -438,6 +532,7 @@ def get_full_raw_scan():
         scan_a
     )
 
+
     angles_b, distances_b = parse_scan_raw(
         scan_b
     )
@@ -448,6 +543,7 @@ def get_full_raw_scan():
         +
         angles_b
     )
+
 
     raw_distances = (
         distances_a
@@ -469,6 +565,7 @@ def get_full_raw_scan():
         dtype=float
     )
 
+
     raw_distances = np.array(
         raw_distances,
         dtype=float
@@ -487,7 +584,7 @@ def get_full_raw_scan():
 
 
 # ============================================================
-# GET REAR SECTOR DISTANCES
+# GET REAR SECTOR
 # ============================================================
 
 def get_rear_sector_distances(
@@ -520,18 +617,7 @@ def get_rear_sector_distances(
 
 
 # ============================================================
-# AUTOMATIC BACK WALL CALIBRATION
-#
-# Known physical distance = 1.60 m.
-#
-# Example:
-#
-# raw rear wall = 1.42 m
-#
-# scale = 1.60 / 1.42
-#       = 1.1268
-#
-# Then ALL LiDAR measurements use that scale.
+# DISTANCE CALIBRATION
 # ============================================================
 
 def update_distance_calibration(
@@ -567,7 +653,6 @@ def update_distance_calibration(
         return
 
 
-    # Median is much safer than a single point.
     frame_median_mm = float(
         np.median(
             rear_distances
@@ -622,8 +707,6 @@ def update_distance_calibration(
     )
 
 
-    # Safety:
-    # reject obviously incorrect calibration.
     if (
         candidate_scale
         <
@@ -638,24 +721,22 @@ def update_distance_calibration(
             "BACK WALL CALIBRATION REJECTED"
         )
 
+
         print(
-            "Raw measured rear wall:",
+            "Measured:",
             measured_raw_distance_m,
             "m"
         )
 
-        print(
-            "Calculated scale:",
-            candidate_scale
-        )
 
         print(
-            "Check that the robot is at the 1.60 m"
-            " start position and nothing blocks the rear."
+            "Candidate scale:",
+            candidate_scale
         )
 
 
         back_wall_calibration_samples = []
+
 
         return
 
@@ -678,18 +759,18 @@ def update_distance_calibration(
     )
 
     print(
-        "BACK WALL DISTANCE CALIBRATION COMPLETE"
+        "DISTANCE CALIBRATION COMPLETE"
     )
 
     print(
-        "Known real distance:",
-        BACK_WALL_REFERENCE_DISTANCE_M,
+        "Raw rear wall:",
+        back_wall_raw_distance_m,
         "m"
     )
 
     print(
-        "Raw LiDAR rear distance:",
-        back_wall_raw_distance_m,
+        "Known rear wall:",
+        BACK_WALL_REFERENCE_DISTANCE_M,
         "m"
     )
 
@@ -704,7 +785,7 @@ def update_distance_calibration(
 
 
 # ============================================================
-# APPLY DISTANCE SCALE
+# APPLY DISTANCE CALIBRATION
 # ============================================================
 
 def apply_distance_calibration(
@@ -718,14 +799,7 @@ def apply_distance_calibration(
 
 
 # ============================================================
-# CURRENT REAR WALL / REAR SECTOR DISTANCE
-#
-# This is NOT permanently forced to 1.60 m.
-#
-# At the original starting position it should read
-# approximately 1.60 m after calibration.
-#
-# If the robot moves, this value is allowed to change.
+# CURRENT BACK DISTANCE
 # ============================================================
 
 def get_current_back_distance(
@@ -755,7 +829,7 @@ def get_current_back_distance(
 
 
 # ============================================================
-# POLAR -> ROBOT LOCAL XY
+# POLAR -> XY
 # ============================================================
 
 def scan_to_xy(
@@ -846,6 +920,7 @@ def best_fit_transform(
         axis=0
     )
 
+
     target_center = np.mean(
         target,
         axis=0
@@ -857,6 +932,7 @@ def best_fit_transform(
         -
         source_center
     )
+
 
     target_zero = (
         target
@@ -887,6 +963,7 @@ def best_fit_transform(
     if np.linalg.det(R) < 0:
 
         VT[-1, :] *= -1
+
 
         R = (
             VT.T
@@ -923,6 +1000,7 @@ def icp_scan_match(
         MAX_ICP_POINTS
     )
 
+
     reference = downsample_points(
         keyframe_points,
         MAX_ICP_POINTS
@@ -945,6 +1023,7 @@ def icp_scan_match(
 
 
     transformed = current.copy()
+
 
     total_R = np.eye(2)
 
@@ -1012,6 +1091,7 @@ def icp_scan_match(
         source_match = transformed[
             valid
         ]
+
 
         target_match = reference[
             indices[valid]
@@ -1094,7 +1174,7 @@ def icp_scan_match(
 
 
 # ============================================================
-# HEADING
+# HEADING FROM ROTATION
 # ============================================================
 
 def get_heading_from_rotation(
@@ -1137,7 +1217,11 @@ def is_icp_quality_good(
     )
 
 
-    if error > MAX_ACCEPTED_ICP_ERROR_M:
+    if (
+        error
+        >
+        MAX_ACCEPTED_ICP_ERROR_M
+    ):
 
         return False
 
@@ -1173,7 +1257,7 @@ def is_icp_quality_good(
 
 
 # ============================================================
-# UPDATE POSE FROM KEYFRAME
+# UPDATE ROBOT POSE
 # ============================================================
 
 def update_pose_from_keyframe(
@@ -1181,10 +1265,13 @@ def update_pose_from_keyframe(
         relative_t):
 
     global robot_rotation
+
     global robot_translation
 
     global robot_x
+
     global robot_y
+
     global robot_heading
 
     global pose_locked
@@ -1218,9 +1305,11 @@ def update_pose_from_keyframe(
             keyframe_rotation.copy()
         )
 
+
         robot_translation = (
             keyframe_translation.copy()
         )
+
 
         pose_locked = True
 
@@ -1233,6 +1322,7 @@ def update_pose_from_keyframe(
             relative_R
         )
 
+
         robot_translation = (
             keyframe_translation
             +
@@ -1241,6 +1331,7 @@ def update_pose_from_keyframe(
             relative_t
         )
 
+
         pose_locked = False
 
 
@@ -1248,9 +1339,11 @@ def update_pose_from_keyframe(
         robot_translation[0]
     )
 
+
     robot_y = float(
         robot_translation[1]
     )
+
 
     robot_heading = get_heading_from_rotation(
         robot_rotation
@@ -1300,6 +1393,7 @@ def create_new_keyframe(
     global keyframe_scan
 
     global keyframe_rotation
+
     global keyframe_translation
 
     global keyframe_number
@@ -1309,13 +1403,16 @@ def create_new_keyframe(
         current_scan.copy()
     )
 
+
     keyframe_rotation = (
         robot_rotation.copy()
     )
 
+
     keyframe_translation = (
         robot_translation.copy()
     )
+
 
     keyframe_number += 1
 
@@ -1342,6 +1439,7 @@ def local_to_world(
     cos_h = math.cos(
         heading_rad
     )
+
 
     sin_h = math.sin(
         heading_rad
@@ -1383,7 +1481,7 @@ def local_to_world(
 
 
 # ============================================================
-# LIVE CLUSTERS
+# LIVE CLUSTERING
 # ============================================================
 
 def find_live_clusters(
@@ -1414,7 +1512,11 @@ def find_live_clusters(
         )
 
 
-        if gap <= LIVE_CLUSTER_GAP_M:
+        if (
+            gap
+            <=
+            LIVE_CLUSTER_GAP_M
+        ):
 
             current_cluster.append(
                 local_points[i]
@@ -1594,12 +1696,6 @@ def find_map_clusters(
 
 # ============================================================
 # CLUSTER INFORMATION
-#
-# Returns:
-#
-# centre X
-# centre Y
-# nearest point distance to robot
 # ============================================================
 
 def get_cluster_information(
@@ -1660,7 +1756,7 @@ def get_cluster_information(
 
 
 # ============================================================
-# OCCUPANCY GRID
+# OCCUPANCY GRID UPDATE
 # ============================================================
 
 def update_occupancy_grid(
@@ -1819,6 +1915,7 @@ def get_nearest_obstacle(
         index
     ]
 
+
     world_point = world_points[
         index
     ]
@@ -1846,11 +1943,172 @@ def get_nearest_obstacle(
         float(
             world_point[0]
         ),
+
         float(
             world_point[1]
         ),
+
         distance,
+
         angle
+    )
+
+
+# ============================================================
+# LOG CURRENT ROBOT POSITION
+#
+# L = LOG
+#
+# Only allows logging when:
+#
+# distance calibration finished
+# localization valid
+# pose lock ON
+# ============================================================
+
+def log_current_position():
+
+    global position_counter
+
+    global last_log_message
+
+
+    if not distance_calibrated:
+
+        last_log_message = (
+            "LOG FAILED - DISTANCE NOT CALIBRATED"
+        )
+
+
+        print(
+            last_log_message
+        )
+
+
+        return
+
+
+    if not localization_valid:
+
+        last_log_message = (
+            "LOG FAILED - LOCALIZATION NOT VALID"
+        )
+
+
+        print(
+            last_log_message
+        )
+
+
+        return
+
+
+    if not pose_locked:
+
+        last_log_message = (
+            "LOG FAILED - WAIT FOR POSE LOCK"
+        )
+
+
+        print(
+            last_log_message
+        )
+
+
+        return
+
+
+    # ========================================================
+    # CREATE POSITION NAME
+    # ========================================================
+
+    position_counter += 1
+
+
+    position_name = (
+        "P"
+        +
+        str(
+            position_counter
+        )
+    )
+
+
+    timestamp = time.strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
+
+
+    # ========================================================
+    # SAVE POSITION IN MEMORY
+    # ========================================================
+
+    position_data = {
+        "name": position_name,
+        "x": float(robot_x),
+        "y": float(robot_y),
+        "heading": float(robot_heading),
+        "timestamp": timestamp
+    }
+
+
+    logged_positions.append(
+        position_data
+    )
+
+
+    # ========================================================
+    # APPEND TO CSV
+    # ========================================================
+
+    with open(
+        POSITION_LOG_FILE,
+        "a",
+        newline=""
+    ) as file:
+
+        writer = csv.writer(
+            file
+        )
+
+
+        writer.writerow(
+            [
+                position_name,
+                robot_x,
+                robot_y,
+                robot_heading,
+                timestamp
+            ]
+        )
+
+
+    last_log_message = (
+        f"{position_name} LOGGED "
+        f"X={robot_x:.2f} "
+        f"Y={robot_y:.2f} "
+        f"H={robot_heading:.1f}°"
+    )
+
+
+    print(
+        "=========================================="
+    )
+
+    print(
+        last_log_message
+    )
+
+    print(
+        "Saved to:"
+    )
+
+    print(
+        POSITION_LOG_FILE
+    )
+
+    print(
+        "=========================================="
     )
 
 
@@ -1870,45 +2128,62 @@ def publish_localization(
         robot_x
     )
 
+
     localization_table.putNumber(
         "RobotY",
         robot_y
     )
+
 
     localization_table.putNumber(
         "RobotHeading",
         robot_heading
     )
 
+
     localization_table.putNumber(
         "ObstacleX",
         obstacle_x
     )
+
 
     localization_table.putNumber(
         "ObstacleY",
         obstacle_y
     )
 
+
     localization_table.putNumber(
         "ObstacleDistance",
         obstacle_distance
     )
+
 
     localization_table.putNumber(
         "ObstacleAngle",
         obstacle_angle
     )
 
+
     localization_table.putNumber(
         "BackWallDistance",
         back_wall_current_distance_m
     )
 
+
     localization_table.putNumber(
         "DistanceScale",
         DISTANCE_SCALE_FACTOR
     )
+
+
+    localization_table.putNumber(
+        "LoggedPositionCount",
+        len(
+            logged_positions
+        )
+    )
+
 
     localization_table.putBoolean(
         "LocalizationValid",
@@ -1977,7 +2252,7 @@ def save_map():
 
 
     # ========================================================
-    # CSV
+    # MAP CSV
     # ========================================================
 
     with open(
@@ -2010,7 +2285,7 @@ def save_map():
 
 
     # ========================================================
-    # PNG
+    # MAP PNG
     # ========================================================
 
     save_fig, save_ax = plt.subplots(
@@ -2031,6 +2306,10 @@ def save_map():
         marker="s"
     )
 
+
+    # ========================================================
+    # OBJECT LABELS
+    # ========================================================
 
     for cluster in confirmed_clusters[
         :MAX_MAP_LABELS
@@ -2065,6 +2344,50 @@ def save_map():
             )
         )
 
+
+    # ========================================================
+    # LOGGED POSITIONS ON SAVED MAP
+    # ========================================================
+
+    for position in logged_positions:
+
+        save_ax.scatter(
+            position["x"],
+            position["y"],
+            s=LOGGED_POSITION_POINT_SIZE,
+            marker="o",
+            zorder=10
+        )
+
+
+        save_ax.text(
+            position["x"],
+            position["y"]
+            +
+            LOGGED_POSITION_LABEL_OFFSET_M,
+            (
+                f'{position["name"]}\n'
+                f'({position["x"]:.2f}, '
+                f'{position["y"]:.2f})\n'
+                f'{position["heading"]:.1f}°'
+            ),
+            fontsize=9,
+            fontweight="bold",
+            ha="center",
+            va="bottom",
+            zorder=11,
+            bbox=dict(
+                boxstyle="round,pad=0.25",
+                facecolor="white",
+                edgecolor="black",
+                alpha=0.95
+            )
+        )
+
+
+    # ========================================================
+    # CURRENT ROBOT
+    # ========================================================
 
     save_ax.scatter(
         robot_x,
@@ -2150,7 +2473,11 @@ def save_map():
 
 
     print(
-        "MAP SAVED:"
+        "=========================================="
+    )
+
+    print(
+        "MAP SAVED"
     )
 
     print(
@@ -2161,56 +2488,71 @@ def save_map():
         png_path
     )
 
+    print(
+        "=========================================="
+    )
+
 
 # ============================================================
-# RESET LOCALIZATION / MAP
+# RESET LOCALIZATION
 #
 # IMPORTANT:
 #
-# R does NOT recalibrate the 1.60 m wall scale.
+# Logged positions are NOT deleted from the CSV.
 #
-# Calibration is only valid at the original measured
-# starting position.
-#
-# Restart the Python program if you want a fresh
-# back-wall calibration.
+# However their coordinate frame belongs to the old map.
+# Therefore don't use R during a position logging test.
 # ============================================================
 
 def reset_localization():
 
     global robot_x
+
     global robot_y
+
     global robot_heading
 
     global robot_rotation
+
     global robot_translation
 
     global keyframe_scan
+
     global keyframe_rotation
+
     global keyframe_translation
+
     global keyframe_number
 
     global localization_valid
+
     global pose_locked
 
     global frame_counter
 
     global last_icp_error
+
     global last_inlier_ratio
 
     global occupancy_grid
 
     global live_view_center_x
+
     global live_view_center_y
 
     global map_min_x
+
     global map_max_x
+
     global map_min_y
+
     global map_max_y
 
 
     robot_x = 0.0
+
     robot_y = 0.0
+
     robot_heading = 0.0
 
 
@@ -2242,7 +2584,9 @@ def reset_localization():
 
     pose_locked = False
 
+
     frame_counter = 0
+
 
     last_icp_error = 999.0
 
@@ -2253,6 +2597,7 @@ def reset_localization():
 
 
     live_view_center_x = 0.0
+
     live_view_center_y = 0.0
 
 
@@ -2260,13 +2605,16 @@ def reset_localization():
         -MAP_INITIAL_HALF_RANGE_M
     )
 
+
     map_max_x = (
         MAP_INITIAL_HALF_RANGE_M
     )
 
+
     map_min_y = (
         -MAP_INITIAL_HALF_RANGE_M
     )
+
 
     map_max_y = (
         MAP_INITIAL_HALF_RANGE_M
@@ -2277,6 +2625,7 @@ def reset_localization():
         -LIVE_HALF_RANGE_M,
         LIVE_HALF_RANGE_M
     )
+
 
     ax_live.set_ylim(
         -LIVE_HALF_RANGE_M,
@@ -2289,6 +2638,7 @@ def reset_localization():
         map_max_x
     )
 
+
     ax_map.set_ylim(
         map_min_y,
         map_max_y
@@ -2296,7 +2646,7 @@ def reset_localization():
 
 
     print(
-        "Localization and map reset."
+        "Localization/map reset."
     )
 
 
@@ -2310,9 +2660,15 @@ def on_key(event):
 
         save_map()
 
+
     elif event.key == "r":
 
         reset_localization()
+
+
+    elif event.key == "l":
+
+        log_current_position()
 
 
 # ============================================================
@@ -2350,12 +2706,13 @@ plt.show(
 
 
 # ============================================================
-# ALLOW ALT+TAB
+# ALT+TAB
 # ============================================================
 
 try:
 
     window = fig.canvas.manager.window
+
 
     if hasattr(
         window,
@@ -2366,6 +2723,7 @@ try:
             "-topmost",
             False
         )
+
 
 except Exception:
 
@@ -2380,31 +2738,38 @@ ax_live.set_facecolor(
     "white"
 )
 
+
 ax_live.set_title(
     "LIVE - Current LiDAR Detections"
 )
+
 
 ax_live.set_xlabel(
     "World X (m)"
 )
 
+
 ax_live.set_ylabel(
     "World Y (m)"
 )
+
 
 ax_live.set_aspect(
     "equal",
     adjustable="box"
 )
 
+
 ax_live.grid(
     False
 )
+
 
 ax_live.set_xlim(
     -LIVE_HALF_RANGE_M,
     LIVE_HALF_RANGE_M
 )
+
 
 ax_live.set_ylim(
     -LIVE_HALF_RANGE_M,
@@ -2495,31 +2860,38 @@ ax_map.set_facecolor(
     "white"
 )
 
+
 ax_map.set_title(
     "PERSISTENT - Confirmed Map"
 )
+
 
 ax_map.set_xlabel(
     "World X (m)"
 )
 
+
 ax_map.set_ylabel(
     "World Y (m)"
 )
+
 
 ax_map.set_aspect(
     "equal",
     adjustable="box"
 )
 
+
 ax_map.grid(
     False
 )
+
 
 ax_map.set_xlim(
     map_min_x,
     map_max_x
 )
+
 
 ax_map.set_ylim(
     map_min_y,
@@ -2570,7 +2942,7 @@ map_robot_label = ax_map.text(
 
 
 # ============================================================
-# MAP LABELS
+# MAP OBJECT LABELS
 # ============================================================
 
 map_labels = []
@@ -2601,6 +2973,22 @@ for _ in range(
     map_labels.append(
         label
     )
+
+
+# ============================================================
+# LOGGED POSITION ARTISTS
+# ============================================================
+
+logged_position_scatter = ax_map.scatter(
+    [],
+    [],
+    s=LOGGED_POSITION_POINT_SIZE,
+    marker="o",
+    zorder=10
+)
+
+
+logged_position_labels = []
 
 
 # ============================================================
@@ -2642,11 +3030,39 @@ print(
 )
 
 print(
-    " LIDAR LOCALIZATION + MAPPING"
+    " LIDAR LOCALIZATION + POSITION LOGGING"
 )
 
 print(
     "=========================================="
+)
+
+print(
+    "L = Log current position"
+)
+
+print(
+    "S = Save map"
+)
+
+print(
+    "R = Reset localization/map"
+)
+
+print(
+    ""
+)
+
+print(
+    "Position log:"
+)
+
+print(
+    POSITION_LOG_FILE
+)
+
+print(
+    ""
 )
 
 print(
@@ -2655,10 +3071,6 @@ print(
 
 print(
     "Keep robot stationary while calibrating."
-)
-
-print(
-    "Waiting for back-wall distance calibration..."
 )
 
 
@@ -2673,7 +3085,7 @@ try:
     ):
 
         # ====================================================
-        # RAW LIDAR
+        # RAW SCAN
         # ====================================================
 
         (
@@ -2690,15 +3102,17 @@ try:
 
             fig.canvas.flush_events()
 
+
             time.sleep(
                 DISPLAY_UPDATE_TIME_S
             )
+
 
             continue
 
 
         # ====================================================
-        # BACK WALL STARTUP CALIBRATION
+        # DISTANCE CALIBRATION
         # ====================================================
 
         if not distance_calibrated:
@@ -2709,7 +3123,6 @@ try:
             )
 
 
-            # Show raw scan while waiting.
             raw_points = scan_to_xy(
                 angles,
                 raw_distances
@@ -2731,10 +3144,10 @@ try:
                     "DISTANCE CALIBRATION\n"
                     "\n"
                     "Keep robot stationary\n"
-                    "Rear wall must be clear\n"
                     "\n"
                     "Known rear wall: 1.60 m\n"
-                    f"Samples: {progress}/"
+                    f"Samples: "
+                    f"{progress}/"
                     f"{BACK_WALL_CALIBRATION_FRAMES}"
                 )
             )
@@ -2744,9 +3157,13 @@ try:
                 (
                     "WAITING FOR CALIBRATION\n"
                     "\n"
-                    "LiDAR angle: "
+                    f"LiDAR angle: "
                     f"{LIDAR_MOUNT_OFFSET_DEG:.1f}°\n"
-                    "Rear reference: 1.60 m"
+                    "Rear reference: 1.60 m\n"
+                    "\n"
+                    "L = Log position\n"
+                    "S = Save map\n"
+                    "R = Reset"
                 )
             )
 
@@ -2765,7 +3182,7 @@ try:
 
 
         # ====================================================
-        # APPLY CALIBRATED DISTANCES
+        # APPLY DISTANCE SCALE
         # ====================================================
 
         distances = apply_distance_calibration(
@@ -2774,7 +3191,7 @@ try:
 
 
         # ====================================================
-        # CURRENT REAR DISTANCE
+        # CURRENT BACK DISTANCE
         # ====================================================
 
         back_wall_current_distance_m = (
@@ -2786,7 +3203,7 @@ try:
 
 
         # ====================================================
-        # XY POINT CLOUD
+        # POINT CLOUD
         # ====================================================
 
         raw_local_points = scan_to_xy(
@@ -2805,19 +3222,24 @@ try:
                 raw_local_points.copy()
             )
 
+
             keyframe_rotation = (
                 robot_rotation.copy()
             )
+
 
             keyframe_translation = (
                 robot_translation.copy()
             )
 
+
             keyframe_number = 1
+
 
             localization_valid = False
 
             pose_locked = True
+
 
             last_icp_error = 999.0
 
@@ -2825,6 +3247,10 @@ try:
 
 
         else:
+
+            # =================================================
+            # CURRENT SCAN -> KEYFRAME
+            # =================================================
 
             (
                 relative_R,
@@ -2841,6 +3267,7 @@ try:
             last_icp_error = (
                 icp_error
             )
+
 
             last_inlier_ratio = (
                 inlier_ratio
@@ -2908,7 +3335,7 @@ try:
 
 
         # ====================================================
-        # MAP
+        # UPDATE MAP
         # ====================================================
 
         frame_counter += 1
@@ -3008,6 +3435,7 @@ try:
                 filtered_world_points
             )
 
+
         else:
 
             live_scatter.set_offsets(
@@ -3016,6 +3444,10 @@ try:
                 )
             )
 
+
+        # ====================================================
+        # ROBOT
+        # ====================================================
 
         live_robot.set_data(
             [robot_x],
@@ -3036,7 +3468,7 @@ try:
 
 
         # ====================================================
-        # LIVE LABELS
+        # LIVE OBJECT LABELS
         # ====================================================
 
         for label in live_labels:
@@ -3100,35 +3532,47 @@ try:
         live_hud.set_text(
             (
                 "ROBOT\n"
+
                 f"X: {robot_x:.2f} m\n"
+
                 f"Y: {robot_y:.2f} m\n"
-                f"Heading: {robot_heading:.2f}°\n"
+
+                f"Heading: "
+                f"{robot_heading:.2f}°\n"
+
                 "\n"
-                f"ICP Error: {last_icp_error:.3f} m\n"
+
+                f"ICP Error: "
+                f"{last_icp_error:.3f} m\n"
+
                 f"ICP Inliers: "
                 f"{last_inlier_ratio * 100:.0f}%\n"
-                f"Keyframe: {keyframe_number}\n"
+
+                f"Keyframe: "
+                f"{keyframe_number}\n"
+
                 f"Pose lock: "
                 f"{'ON' if pose_locked else 'OFF'}\n"
+
                 "\n"
-                "DISTANCE CALIBRATION\n"
-                f"Raw rear start: "
-                f"{back_wall_raw_distance_m:.3f} m\n"
-                f"Known rear start: "
-                f"{BACK_WALL_REFERENCE_DISTANCE_M:.2f} m\n"
-                f"Scale: "
-                f"{DISTANCE_SCALE_FACTOR:.4f}\n"
-                f"Current rear: "
-                f"{back_wall_current_distance_m:.2f} m\n"
+
+                f"Logged positions: "
+                f"{len(logged_positions)}\n"
+
+                f"{last_log_message}\n"
+
                 "\n"
+
                 "NEAREST DETECTION\n"
-                f"X: {obstacle_x:.2f} m\n"
-                f"Y: {obstacle_y:.2f} m\n"
+
                 f"Distance: "
                 f"{obstacle_distance:.2f} m\n"
+
                 f"Angle: "
                 f"{obstacle_angle:.1f}°\n"
+
                 "\n"
+
                 f"Localization: "
                 f"{'VALID' if localization_valid else 'HOLD'}"
             )
@@ -3149,7 +3593,9 @@ try:
             LIVE_RECENTER_THRESHOLD_M
         ):
 
-            live_view_center_x = robot_x
+            live_view_center_x = (
+                robot_x
+            )
 
 
             ax_live.set_xlim(
@@ -3173,7 +3619,9 @@ try:
             LIVE_RECENTER_THRESHOLD_M
         ):
 
-            live_view_center_y = robot_y
+            live_view_center_y = (
+                robot_y
+            )
 
 
             ax_live.set_ylim(
@@ -3188,7 +3636,7 @@ try:
 
 
         # ====================================================
-        # MAP POINTS
+        # CONFIRMED MAP
         # ====================================================
 
         if len(
@@ -3198,6 +3646,7 @@ try:
             map_scatter.set_offsets(
                 confirmed_map_points
             )
+
 
         else:
 
@@ -3209,7 +3658,7 @@ try:
 
 
         # ====================================================
-        # MAP LABELS
+        # MAP OBJECT LABELS
         # ====================================================
 
         for label in map_labels:
@@ -3258,6 +3707,88 @@ try:
 
             label.set_visible(
                 True
+            )
+
+
+        # ====================================================
+        # LOGGED POSITION POINTS
+        # ====================================================
+
+        if len(
+            logged_positions
+        ) > 0:
+
+            logged_xy = np.array(
+                [
+                    [
+                        position["x"],
+                        position["y"]
+                    ]
+                    for position in logged_positions
+                ],
+                dtype=float
+            )
+
+
+            logged_position_scatter.set_offsets(
+                logged_xy
+            )
+
+
+        else:
+
+            logged_position_scatter.set_offsets(
+                np.empty(
+                    (0, 2)
+                )
+            )
+
+
+        # ====================================================
+        # DELETE OLD LOGGED POSITION TEXT ARTISTS
+        # ====================================================
+
+        for artist in logged_position_labels:
+
+            artist.remove()
+
+
+        logged_position_labels.clear()
+
+
+        # ====================================================
+        # CREATE LOGGED POSITION LABELS
+        # ====================================================
+
+        for position in logged_positions:
+
+            artist = ax_map.text(
+                position["x"],
+                position["y"]
+                +
+                LOGGED_POSITION_LABEL_OFFSET_M,
+                (
+                    f'{position["name"]}\n'
+                    f'({position["x"]:.2f}, '
+                    f'{position["y"]:.2f})\n'
+                    f'{position["heading"]:.1f}°'
+                ),
+                fontsize=9,
+                fontweight="bold",
+                ha="center",
+                va="bottom",
+                zorder=11,
+                bbox=dict(
+                    boxstyle="round,pad=0.25",
+                    facecolor="white",
+                    edgecolor="black",
+                    alpha=0.95
+                )
+            )
+
+
+            logged_position_labels.append(
+                artist
             )
 
 
@@ -3324,39 +3855,38 @@ try:
 
                 "\n"
 
+                f"Logged positions: "
+                f"{len(logged_positions)}\n"
+
+                "\n"
+
                 f"Confirmed cells: "
                 f"{len(confirmed_map_points)}\n"
 
                 f"Confirmed objects: "
                 f"{len(confirmed_map_clusters)}\n"
 
-                f"Grid size: "
-                f"{GRID_SIZE_M * 100:.0f} cm\n"
-
                 "\n"
-
-                f"Angle correction: "
-                f"{LIDAR_MOUNT_OFFSET_DEG:.1f}°\n"
 
                 f"Distance scale: "
                 f"{DISTANCE_SCALE_FACTOR:.4f}\n"
-
-                f"Start rear wall: "
-                f"{BACK_WALL_REFERENCE_DISTANCE_M:.2f} m\n"
 
                 f"Current rear: "
                 f"{back_wall_current_distance_m:.2f} m\n"
 
                 "\n"
 
+                "L = Log position\n"
+
                 "S = Save map\n"
+
                 "R = Reset map"
             )
         )
 
 
         # ====================================================
-        # EXPAND MAP RANGE
+        # MAP RANGE
         # ====================================================
 
         if len(
@@ -3420,6 +3950,7 @@ try:
                     MAP_EXPAND_MARGIN_M
                 )
 
+
                 limits_changed = True
 
 
@@ -3436,6 +3967,7 @@ try:
                     +
                     MAP_EXPAND_MARGIN_M
                 )
+
 
                 limits_changed = True
 
@@ -3454,6 +3986,7 @@ try:
                     MAP_EXPAND_MARGIN_M
                 )
 
+
                 limits_changed = True
 
 
@@ -3471,6 +4004,7 @@ try:
                     MAP_EXPAND_MARGIN_M
                 )
 
+
                 limits_changed = True
 
 
@@ -3480,6 +4014,7 @@ try:
                     map_min_x,
                     map_max_x
                 )
+
 
                 ax_map.set_ylim(
                     map_min_y,
@@ -3493,7 +4028,9 @@ try:
 
         fig.canvas.draw_idle()
 
+
         fig.canvas.flush_events()
+
 
         time.sleep(
             DISPLAY_UPDATE_TIME_S
@@ -3517,6 +4054,17 @@ finally:
         "LocalizationValid",
         False
     )
+
+
+    print(
+        "Position log saved at:"
+    )
+
+
+    print(
+        POSITION_LOG_FILE
+    )
+
 
     print(
         "Localization closed."
