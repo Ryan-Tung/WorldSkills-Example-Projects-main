@@ -28,6 +28,14 @@ localization_table = NetworkTables.getTable(
     "LidarLocalization"
 )
 
+robot_pose_table = NetworkTables.getTable(
+    "RobotPose"
+)
+
+keyboard_table = NetworkTables.getTable(
+    "KeyboardDrive"
+)
+
 
 # ============================================================
 # SAVE FOLDER
@@ -49,7 +57,7 @@ os.makedirs(
 
 
 # ============================================================
-# POSITION LOG FILE
+# POSITION LOG
 # ============================================================
 
 POSITION_LOG_TIMESTAMP = time.strftime(
@@ -64,7 +72,6 @@ POSITION_LOG_FILE = os.path.join(
     +
     ".csv"
 )
-
 
 logged_positions = []
 
@@ -100,7 +107,7 @@ create_position_log_file()
 
 
 # ============================================================
-# LIDAR BASIC SETTINGS
+# LIDAR SETTINGS
 # ============================================================
 
 MIN_DISTANCE_MM = 120.0
@@ -112,8 +119,6 @@ MIN_SCAN_POINTS = 30
 
 # ============================================================
 # LIDAR MOUNTING ANGLE
-#
-# This belongs to the robot itself.
 # ============================================================
 
 LIDAR_MOUNT_OFFSET_DEG = -20.0
@@ -123,7 +128,6 @@ LIDAR_MOUNT_OFFSET_DEG = -20.0
 # DISTANCE SCALE
 #
 # Flexible arena.
-#
 # No known wall is required.
 # ============================================================
 
@@ -131,158 +135,127 @@ DISTANCE_SCALE_FACTOR = 1.0
 
 
 # ============================================================
-# LIDAR OFFSET FROM ROBOT ROTATION CENTRE
+# NAVX
 #
-# +X = right
-# +Y = forward
+# navX is now responsible for heading.
 #
-# If LiDAR is approximately at robot centre:
-#
-# leave both as 0.
+# If physical left/right direction is reversed,
+# change 1.0 to -1.0.
 # ============================================================
 
-LIDAR_OFFSET_X_M = 0.0
-
-LIDAR_OFFSET_Y_M = 0.0
+NAVX_HEADING_SIGN = 1.0
 
 
 # ============================================================
-# HEADING STABILIZATION
+# NAVX ZERO
 #
-# Previous:
+# Python keeps its own zero reference.
 #
-# 0.35 caused quite noticeable lag.
+# Press R:
 #
-# 0.75 follows the raw LiDAR heading much faster.
+# current robot direction = 0°
 # ============================================================
 
-HEADING_SMOOTHING_ALPHA = 0.75
+navx_zero_offset = 0.0
 
+navx_zero_initialized = False
 
-# Only clamp clearly unrealistic frame-to-frame jumps.
-MAX_HEADING_CHANGE_PER_FRAME_DEG = 25.0
+navx_available = False
 
-
-# Ignore only very tiny noise.
-MIN_HEADING_CHANGE_TO_UPDATE_DEG = 0.10
-
-
-stable_robot_heading = 0.0
-
-stable_heading_initialized = False
+raw_navx_heading = 0.0
 
 
 # ============================================================
-# NORMAL ICP
-#
-# Current scan -> previous successful scan.
-#
-# This is the main localization method.
+# ROBOT HEADING
 # ============================================================
 
-NORMAL_ICP_POINTS = 220
+robot_heading = 0.0
+
+previous_navx_heading = 0.0
+
+keyframe_navx_heading = 0.0
+
+
+# ============================================================
+# NORMAL TRANSLATION ICP
+#
+# navX gives rotation.
+#
+# ICP is only used to estimate translation.
+# ============================================================
+
+NORMAL_ICP_POINTS = 260
 
 NORMAL_ICP_ITERATIONS = 8
 
-NORMAL_CORRESPONDENCE_M = 0.50
+NORMAL_CORRESPONDENCE_M = 0.45
 
-NORMAL_MIN_MATCHES = 18
-
+NORMAL_MIN_MATCHES = 20
 
 NORMAL_MAX_ERROR_M = 0.10
 
-NORMAL_MIN_INLIER_RATIO = 0.28
+NORMAL_MIN_INLIER_RATIO = 0.30
 
-NORMAL_MAX_TRANSLATION_M = 0.60
-
-NORMAL_MAX_ROTATION_DEG = 30.0
+NORMAL_MAX_TRANSLATION_M = 0.45
 
 
 # ============================================================
 # RECOVERY ICP
-#
-# More tolerant than normal tracking.
 # ============================================================
 
-RECOVERY_ICP_POINTS = 300
+RECOVERY_ICP_POINTS = 320
 
 RECOVERY_ICP_ITERATIONS = 12
 
-RECOVERY_CORRESPONDENCE_M = 0.75
+RECOVERY_CORRESPONDENCE_M = 0.70
 
 RECOVERY_MIN_MATCHES = 15
-
 
 RECOVERY_MAX_ERROR_M = 0.16
 
 RECOVERY_MIN_INLIER_RATIO = 0.20
 
-RECOVERY_MAX_TRANSLATION_M = 1.20
-
-RECOVERY_MAX_ROTATION_DEG = 60.0
+RECOVERY_MAX_TRANSLATION_M = 1.00
 
 
 # ============================================================
-# ROTATION-IN-PLACE FILTER
+# PURE ROTATION COMMAND DETECTION
 #
-# This prevents Q / E from drawing a large fake circle.
-# ============================================================
-
-ROTATION_ONLY_MIN_ANGLE_DEG = 0.70
-
-ROTATION_ONLY_MAX_TRANSLATION_M = 0.10
-
-
-STRONG_ROTATION_MIN_ANGLE_DEG = 2.00
-
-STRONG_ROTATION_MAX_TRANSLATION_M = 0.16
-
-
-# ============================================================
-# KEYFRAME SETTINGS
-# ============================================================
-
-KEYFRAME_TRANSLATION_M = 0.18
-
-KEYFRAME_ROTATION_DEG = 5.0
-
-
-# ============================================================
-# KEYFRAME CORRECTION ACCEPTANCE
-# ============================================================
-
-KEYFRAME_CORRECTION_MAX_POSITION_DIFF_M = 0.25
-
-KEYFRAME_CORRECTION_MAX_HEADING_DIFF_DEG = 10.0
-
-
-# ============================================================
-# IMPORTANT:
+# Q / E:
 #
-# DON'T keep "correcting" the keyframe while robot is sitting
-# still.
-#
-# Your screenshot showed:
-#
-# Corrections: 166
-#
-# while basically stationary.
-#
-# These thresholds stop that.
+# X ≈ 0
+# Y ≈ 0
+# Z != 0
 # ============================================================
 
-MIN_KEYFRAME_CORRECTION_TRANSLATION_M = 0.03
+KEYBOARD_MOVE_THRESHOLD = 0.05
 
-MIN_KEYFRAME_CORRECTION_ROTATION_DEG = 1.50
+KEYBOARD_TURN_THRESHOLD = 0.05
 
 
 # ============================================================
-# STATIONARY LOCK
+# BACKUP ROTATION TRANSLATION SUPPRESSION
 # ============================================================
 
-STATIONARY_TRANSLATION_M = 0.008
+ROTATION_SUPPRESSION_MIN_DEG = 0.40
 
-STATIONARY_ROTATION_DEG = 0.25
+ROTATION_SUPPRESSION_MAX_TRANSLATION_M = 0.10
+
+
+# ============================================================
+# KEYFRAME
+# ============================================================
+
+KEYFRAME_TRANSLATION_M = 0.20
+
+KEYFRAME_ROTATION_DEG = 8.0
+
+
+# ============================================================
+# STATIONARY TRANSLATION FILTER
+# ============================================================
+
+STATIONARY_TRANSLATION_M = 0.006
 
 
 # ============================================================
@@ -295,7 +268,7 @@ LIVE_MIN_CLUSTER_POINTS = 4
 
 
 # ============================================================
-# OCCUPANCY MAP
+# OCCUPANCY GRID
 # ============================================================
 
 GRID_SIZE_M = 0.05
@@ -317,37 +290,29 @@ MAP_POINT_SIZE = 9
 
 SAVED_MAP_POINT_SIZE = 9
 
-
 LIVE_HALF_RANGE_M = 5.0
 
 LIVE_RECENTER_THRESHOLD_M = 2.5
-
 
 MAP_INITIAL_HALF_RANGE_M = 5.0
 
 MAP_EXPAND_MARGIN_M = 1.0
 
-
 DISPLAY_UPDATE_TIME_S = 0.02
 
 
 # ============================================================
-# RAW LIDAR SENSOR POSE
+# ROBOT POSITION
 #
-# Used internally by ICP.
+# X/Y = LiDAR translation
+# Heading = navX
 # ============================================================
 
-lidar_x = 0.0
+robot_x = 0.0
 
-lidar_y = 0.0
+robot_y = 0.0
 
-lidar_heading = 0.0
-
-
-lidar_rotation = np.eye(2)
-
-
-lidar_translation = np.array(
+robot_translation = np.array(
     [
         0.0,
         0.0
@@ -357,27 +322,10 @@ lidar_translation = np.array(
 
 
 # ============================================================
-# STABLE ROBOT CENTRE POSE
-#
-# These values are sent to keyboard_drive.py.
-# ============================================================
-
-robot_x = 0.0
-
-robot_y = 0.0
-
-robot_heading = 0.0
-
-
-# ============================================================
-# PREVIOUS SUCCESSFUL SCAN
+# PREVIOUS GOOD SCAN
 # ============================================================
 
 previous_good_scan = None
-
-
-previous_good_rotation = np.eye(2)
-
 
 previous_good_translation = np.array(
     [
@@ -394,10 +342,6 @@ previous_good_translation = np.array(
 
 keyframe_scan = None
 
-
-keyframe_rotation = np.eye(2)
-
-
 keyframe_translation = np.array(
     [
         0.0,
@@ -406,12 +350,11 @@ keyframe_translation = np.array(
     dtype=float
 )
 
-
 keyframe_number = 0
 
 
 # ============================================================
-# LOCALIZATION STATUS
+# STATUS
 # ============================================================
 
 localization_valid = False
@@ -420,33 +363,25 @@ localization_state = "STARTING"
 
 pose_locked = False
 
-
 recovery_count = 0
 
-keyframe_correction_count = 0
-
-rotation_filter_count = 0
+rotation_hold_count = 0
 
 consecutive_hold_count = 0
 
-
 frame_counter = 0
-
 
 last_icp_error = 999.0
 
 last_inlier_ratio = 0.0
 
-
 last_relative_translation = 0.0
 
-last_relative_rotation = 0.0
-
-last_rotation_filter_active = False
+last_navx_delta = 0.0
 
 
 # ============================================================
-# MAP STORAGE
+# OCCUPANCY GRID STORAGE
 # ============================================================
 
 occupancy_grid = {}
@@ -459,7 +394,6 @@ occupancy_grid = {}
 live_view_center_x = 0.0
 
 live_view_center_y = 0.0
-
 
 map_min_x = -MAP_INITIAL_HALF_RANGE_M
 
@@ -481,11 +415,9 @@ def normalize_angle(
 
         angle_deg -= 360.0
 
-
     while angle_deg < 0.0:
 
         angle_deg += 360.0
-
 
     return angle_deg
 
@@ -497,11 +429,9 @@ def normalize_heading(
 
         angle_deg -= 360.0
 
-
     while angle_deg < -180.0:
 
         angle_deg += 360.0
-
 
     return angle_deg
 
@@ -510,226 +440,214 @@ def heading_difference(
         first,
         second):
 
-    return abs(
-        normalize_heading(
-            first
-            -
-            second
-        )
-    )
-
-
-# ============================================================
-# STABLE HEADING FILTER
-#
-# Uses shortest angular difference.
-#
-# Example:
-#
-# 179° -> -179°
-#
-# is treated as 2°, not 358°.
-# ============================================================
-
-def update_stable_heading(
-        raw_heading):
-
-    global stable_robot_heading
-
-    global stable_heading_initialized
-
-
-    raw_heading = normalize_heading(
-        raw_heading
-    )
-
-
-    # ========================================================
-    # FIRST VALUE
-    # ========================================================
-
-    if not stable_heading_initialized:
-
-        stable_robot_heading = (
-            raw_heading
-        )
-
-
-        stable_heading_initialized = True
-
-
-        return (
-            stable_robot_heading
-        )
-
-
-    # ========================================================
-    # SHORTEST DIFFERENCE
-    # ========================================================
-
-    difference = normalize_heading(
-        raw_heading
-        -
-        stable_robot_heading
-    )
-
-
-    # ========================================================
-    # IGNORE VERY SMALL JITTER
-    # ========================================================
-
-    if (
-        abs(
-            difference
-        )
-        <
-        MIN_HEADING_CHANGE_TO_UPDATE_DEG
-    ):
-
-        return (
-            stable_robot_heading
-        )
-
-
-    # ========================================================
-    # LIMIT ONLY BIG BAD JUMPS
-    # ========================================================
-
-    if (
-        abs(
-            difference
-        )
-        >
-        MAX_HEADING_CHANGE_PER_FRAME_DEG
-    ):
-
-        difference = math.copysign(
-            MAX_HEADING_CHANGE_PER_FRAME_DEG,
-            difference
-        )
-
-
-    # ========================================================
-    # RESPONSIVE SMOOTHING
-    # ========================================================
-
-    stable_robot_heading = normalize_heading(
-        stable_robot_heading
-        +
-        HEADING_SMOOTHING_ALPHA
-        *
-        difference
-    )
-
-
-    return (
-        stable_robot_heading
-    )
-
-
-# ============================================================
-# ROTATION MATRIX -> HEADING
-# ============================================================
-
-def get_heading_from_rotation(
-        rotation):
-
-    heading = math.degrees(
-        math.atan2(
-            rotation[0, 1],
-            rotation[1, 1]
-        )
-    )
-
-
     return normalize_heading(
-        heading
+        first
+        -
+        second
     )
 
 
 # ============================================================
-# UPDATE ROBOT CENTRE FROM LIDAR SENSOR POSE
+# ROTATION MATRIX
+#
+# +X = right
+# +Y = forward
+#
+# 0° = forward
 # ============================================================
 
-def update_robot_pose_from_lidar():
-
-    global robot_x
-
-    global robot_y
-
-    global robot_heading
-
-
-    # ========================================================
-    # STABLE USER-VISIBLE HEADING
-    # ========================================================
-
-    robot_heading = update_stable_heading(
-        lidar_heading
-    )
-
+def heading_rotation_matrix(
+        heading_deg):
 
     heading_rad = math.radians(
-        robot_heading
+        heading_deg
     )
-
 
     cos_h = math.cos(
         heading_rad
     )
 
-
     sin_h = math.sin(
         heading_rad
     )
 
-
-    # ========================================================
-    # SENSOR OFFSET IN WORLD FRAME
-    # ========================================================
-
-    offset_world_x = (
-        LIDAR_OFFSET_X_M
-        *
-        cos_h
-        +
-        LIDAR_OFFSET_Y_M
-        *
-        sin_h
-    )
-
-
-    offset_world_y = (
-        -LIDAR_OFFSET_X_M
-        *
-        sin_h
-        +
-        LIDAR_OFFSET_Y_M
-        *
-        cos_h
-    )
-
-
-    # ========================================================
-    # ROBOT ROTATION CENTRE
-    # ========================================================
-
-    robot_x = (
-        lidar_x
-        -
-        offset_world_x
-    )
-
-
-    robot_y = (
-        lidar_y
-        -
-        offset_world_y
+    return np.array(
+        [
+            [
+                cos_h,
+                sin_h
+            ],
+            [
+                -sin_h,
+                cos_h
+            ]
+        ],
+        dtype=float
     )
 
 
 # ============================================================
-# PARSE LIDAR SCAN
+# READ NAVX
+#
+# Expected Java NetworkTables:
+#
+# table:
+# RobotPose
+#
+# key:
+# Heading
+# ============================================================
+
+def read_navx_heading():
+
+    global raw_navx_heading
+    global navx_available
+
+    value = robot_pose_table.getNumber(
+        "Heading",
+        9999.0
+    )
+
+    if value == 9999.0:
+
+        navx_available = False
+
+        return None
+
+    raw_navx_heading = float(
+        value
+    )
+
+    navx_available = True
+
+    return raw_navx_heading
+
+
+# ============================================================
+# GET PYTHON-RELATIVE NAVX HEADING
+# ============================================================
+
+def get_relative_navx_heading():
+
+    global navx_zero_offset
+    global navx_zero_initialized
+
+    current_raw = read_navx_heading()
+
+    if current_raw is None:
+
+        return None
+
+    if not navx_zero_initialized:
+
+        navx_zero_offset = (
+            current_raw
+        )
+
+        navx_zero_initialized = True
+
+    relative = (
+        current_raw
+        -
+        navx_zero_offset
+    )
+
+    relative *= (
+        NAVX_HEADING_SIGN
+    )
+
+    return normalize_heading(
+        relative
+    )
+
+
+# ============================================================
+# RESET PYTHON NAVX ZERO
+# ============================================================
+
+def reset_python_navx_zero():
+
+    global navx_zero_offset
+    global navx_zero_initialized
+
+    global robot_heading
+    global previous_navx_heading
+    global keyframe_navx_heading
+
+    current_raw = read_navx_heading()
+
+    if current_raw is None:
+
+        navx_zero_initialized = False
+
+        robot_heading = 0.0
+
+        previous_navx_heading = 0.0
+
+        keyframe_navx_heading = 0.0
+
+        return
+
+    navx_zero_offset = (
+        current_raw
+    )
+
+    navx_zero_initialized = True
+
+    robot_heading = 0.0
+
+    previous_navx_heading = 0.0
+
+    keyframe_navx_heading = 0.0
+
+
+# ============================================================
+# PURE Q/E ROTATION?
+# ============================================================
+
+def pure_rotation_commanded():
+
+    enabled = keyboard_table.getBoolean(
+        "Enabled",
+        False
+    )
+
+    if not enabled:
+
+        return False
+
+    command_x = keyboard_table.getNumber(
+        "X",
+        0.0
+    )
+
+    command_y = keyboard_table.getNumber(
+        "Y",
+        0.0
+    )
+
+    command_z = keyboard_table.getNumber(
+        "Z",
+        0.0
+    )
+
+    return (
+        abs(command_z)
+        >=
+        KEYBOARD_TURN_THRESHOLD
+        and
+        abs(command_x)
+        <
+        KEYBOARD_MOVE_THRESHOLD
+        and
+        abs(command_y)
+        <
+        KEYBOARD_MOVE_THRESHOLD
+    )
+
+
+# ============================================================
+# PARSE SCAN
 # ============================================================
 
 def parse_scan(
@@ -739,7 +657,6 @@ def parse_scan(
 
     distances = []
 
-
     if scan_array is None:
 
         return (
@@ -747,13 +664,11 @@ def parse_scan(
             distances
         )
 
-
     usable_length = (
         len(scan_array)
         -
         len(scan_array) % 2
     )
-
 
     for index in range(
         0,
@@ -765,11 +680,9 @@ def parse_scan(
             scan_array[index]
         )
 
-
         raw_distance_mm = float(
             scan_array[index + 1]
         )
-
 
         if (
             raw_distance_mm
@@ -787,23 +700,19 @@ def parse_scan(
                 LIDAR_MOUNT_OFFSET_DEG
             )
 
-
-            corrected_distance_mm = (
+            corrected_distance = (
                 raw_distance_mm
                 *
                 DISTANCE_SCALE_FACTOR
             )
 
-
             angles.append(
                 corrected_angle
             )
 
-
             distances.append(
-                corrected_distance_mm
+                corrected_distance
             )
-
 
     return (
         angles,
@@ -822,22 +731,18 @@ def get_full_scan():
         []
     )
 
-
     scan_b = lidar_table.getNumberArray(
         "ScanB",
         []
     )
 
-
     angles_a, distances_a = parse_scan(
         scan_a
     )
 
-
     angles_b, distances_b = parse_scan(
         scan_b
     )
-
 
     angles = (
         angles_a
@@ -845,13 +750,11 @@ def get_full_scan():
         angles_b
     )
 
-
     distances = (
         distances_a
         +
         distances_b
     )
-
 
     if len(angles) == 0:
 
@@ -860,23 +763,19 @@ def get_full_scan():
             np.array([])
         )
 
-
     angles = np.array(
         angles,
         dtype=float
     )
-
 
     distances = np.array(
         distances,
         dtype=float
     )
 
-
     order = np.argsort(
         angles
     )
-
 
     return (
         angles[order],
@@ -885,10 +784,7 @@ def get_full_scan():
 
 
 # ============================================================
-# POLAR -> ROBOT LOCAL XY
-#
-# 0°   = +Y = forward
-# 90°  = +X = right
+# POLAR -> LOCAL XY
 # ============================================================
 
 def scan_to_xy(
@@ -901,11 +797,9 @@ def scan_to_xy(
             (0, 2)
         )
 
-
     angle_rad = np.radians(
         angles
     )
-
 
     distance_m = (
         distances
@@ -913,8 +807,7 @@ def scan_to_xy(
         1000.0
     )
 
-
-    x = (
+    local_x = (
         distance_m
         *
         np.sin(
@@ -922,8 +815,7 @@ def scan_to_xy(
         )
     )
 
-
-    y = (
+    local_y = (
         distance_m
         *
         np.cos(
@@ -931,11 +823,10 @@ def scan_to_xy(
         )
     )
 
-
     return np.column_stack(
         (
-            x,
-            y
+            local_x,
+            local_y
         )
     )
 
@@ -952,7 +843,6 @@ def downsample_points(
 
         return points.copy()
 
-
     indices = np.linspace(
         0,
         len(points) - 1,
@@ -960,101 +850,22 @@ def downsample_points(
         dtype=int
     )
 
-
     return points[
         indices
     ]
 
 
 # ============================================================
-# BEST-FIT RIGID TRANSFORM
+# TRANSLATION-ONLY ICP
+#
+# navX supplies the rotation.
+# ICP estimates translation only.
 # ============================================================
 
-def best_fit_transform(
-        source,
-        target):
-
-    source_center = np.mean(
-        source,
-        axis=0
-    )
-
-
-    target_center = np.mean(
-        target,
-        axis=0
-    )
-
-
-    source_zero = (
-        source
-        -
-        source_center
-    )
-
-
-    target_zero = (
-        target
-        -
-        target_center
-    )
-
-
-    h_matrix = (
-        source_zero.T
-        @
-        target_zero
-    )
-
-
-    u_matrix, _, vt_matrix = np.linalg.svd(
-        h_matrix
-    )
-
-
-    rotation = (
-        vt_matrix.T
-        @
-        u_matrix.T
-    )
-
-
-    if np.linalg.det(
-        rotation
-    ) < 0:
-
-        vt_matrix[-1, :] *= -1
-
-
-        rotation = (
-            vt_matrix.T
-            @
-            u_matrix.T
-        )
-
-
-    translation = (
-        target_center
-        -
-        rotation
-        @
-        source_center
-    )
-
-
-    return (
-        rotation,
-        translation
-    )
-
-
-# ============================================================
-# GENERIC ICP
-# ============================================================
-
-def run_icp(
+def translation_icp(
         current_points,
         reference_points,
+        known_heading_delta_deg,
         max_points,
         iterations,
         correspondence_distance,
@@ -1065,12 +876,10 @@ def run_icp(
         max_points
     )
 
-
     reference = downsample_points(
         reference_points,
         max_points
     )
-
 
     if (
         len(current)
@@ -1083,36 +892,37 @@ def run_icp(
     ):
 
         return (
-            np.eye(2),
             np.zeros(2),
             False,
             999.0,
             0.0
         )
 
+    # ========================================================
+    # ALIGN CURRENT SCAN USING NAVX ROTATION
+    # ========================================================
 
-    transformed = (
-        current.copy()
+    known_rotation = heading_rotation_matrix(
+        known_heading_delta_deg
     )
 
-
-    total_rotation = np.eye(2)
-
+    transformed = (
+        current
+        @
+        known_rotation.T
+    )
 
     total_translation = np.zeros(
         2
     )
 
-
     tree = cKDTree(
         reference
     )
 
-
     previous_error = None
 
     final_ratio = 0.0
-
 
     for _ in range(
         iterations
@@ -1123,20 +933,17 @@ def run_icp(
             k=1
         )
 
-
         valid = (
             distances
             <
             correspondence_distance
         )
 
-
         valid_count = int(
             np.count_nonzero(
                 valid
             )
         )
-
 
         if (
             valid_count
@@ -1145,13 +952,11 @@ def run_icp(
         ):
 
             return (
-                np.eye(2),
                 np.zeros(2),
                 False,
                 999.0,
                 0.0
             )
-
 
         final_ratio = (
             valid_count
@@ -1161,57 +966,66 @@ def run_icp(
             )
         )
 
-
         source_match = transformed[
             valid
         ]
-
 
         target_match = reference[
             indices[valid]
         ]
 
-
-        (
-            step_rotation,
-            step_translation
-        ) = best_fit_transform(
-            source_match,
+        translation_step = np.mean(
             target_match
+            -
+            source_match,
+            axis=0
         )
-
 
         transformed = (
             transformed
-            @
-            step_rotation.T
-        ) + step_translation
-
+            +
+            translation_step
+        )
 
         total_translation = (
-            step_rotation
-            @
             total_translation
             +
-            step_translation
+            translation_step
         )
 
-
-        total_rotation = (
-            step_rotation
-            @
-            total_rotation
+        new_distances, _ = tree.query(
+            transformed,
+            k=1
         )
 
+        new_valid = (
+            new_distances
+            <
+            correspondence_distance
+        )
+
+        if (
+            np.count_nonzero(
+                new_valid
+            )
+            <
+            minimum_matches
+        ):
+
+            return (
+                np.zeros(2),
+                False,
+                999.0,
+                0.0
+            )
 
         error = float(
             np.mean(
-                distances[
-                    valid
+                new_distances[
+                    new_valid
                 ]
             )
         )
-
 
         if previous_error is not None:
 
@@ -1221,30 +1035,28 @@ def run_icp(
                 error
             )
 
+            if improvement < 0.0001:
 
-            if improvement < 0.00015:
+                previous_error = (
+                    error
+                )
 
                 break
-
 
         previous_error = (
             error
         )
 
-
     if previous_error is None:
 
         return (
-            np.eye(2),
             np.zeros(2),
             False,
             999.0,
             0.0
         )
 
-
     return (
-        total_rotation,
         total_translation,
         True,
         previous_error,
@@ -1253,58 +1065,55 @@ def run_icp(
 
 
 # ============================================================
-# NORMAL ICP
+# NORMAL TRANSLATION MATCH
 # ============================================================
 
-def normal_icp(
-        current,
-        reference):
-
-    return run_icp(
+def normal_translation_match(
         current,
         reference,
+        heading_delta):
+
+    return translation_icp(
+        current,
+        reference,
+        heading_delta,
 
         NORMAL_ICP_POINTS,
-
         NORMAL_ICP_ITERATIONS,
-
         NORMAL_CORRESPONDENCE_M,
-
         NORMAL_MIN_MATCHES
     )
 
 
 # ============================================================
-# RECOVERY ICP
+# RECOVERY TRANSLATION MATCH
 # ============================================================
 
-def recovery_icp(
-        current,
-        reference):
-
-    return run_icp(
+def recovery_translation_match(
         current,
         reference,
+        heading_delta):
+
+    return translation_icp(
+        current,
+        reference,
+        heading_delta,
 
         RECOVERY_ICP_POINTS,
-
         RECOVERY_ICP_ITERATIONS,
-
         RECOVERY_CORRESPONDENCE_M,
-
         RECOVERY_MIN_MATCHES
     )
 
 
 # ============================================================
-# QUALITY CHECK
+# TRANSLATION QUALITY
 # ============================================================
 
-def transform_quality_good(
-        rotation,
+def translation_quality_good(
         translation,
         error,
-        ratio,
+        inlier_ratio,
         recovery=False):
 
     movement = float(
@@ -1313,14 +1122,6 @@ def transform_quality_good(
         )
     )
 
-
-    rotation_amount = abs(
-        get_heading_from_rotation(
-            rotation
-        )
-    )
-
-
     if recovery:
 
         return (
@@ -1328,313 +1129,85 @@ def transform_quality_good(
             <=
             RECOVERY_MAX_ERROR_M
             and
-            ratio
+            inlier_ratio
             >=
             RECOVERY_MIN_INLIER_RATIO
             and
             movement
             <=
             RECOVERY_MAX_TRANSLATION_M
-            and
-            rotation_amount
-            <=
-            RECOVERY_MAX_ROTATION_DEG
         )
-
 
     return (
         error
         <=
         NORMAL_MAX_ERROR_M
         and
-        ratio
+        inlier_ratio
         >=
         NORMAL_MIN_INLIER_RATIO
         and
         movement
         <=
         NORMAL_MAX_TRANSLATION_M
-        and
-        rotation_amount
-        <=
-        NORMAL_MAX_ROTATION_DEG
     )
 
 
 # ============================================================
-# ROTATION-DOMINANT MOTION?
+# LOCAL TRANSLATION -> WORLD
 # ============================================================
 
-def is_rotation_dominant(
-        rotation,
-        translation):
+def local_translation_to_world(
+        local_translation,
+        reference_heading):
 
-    rotation_amount = abs(
-        get_heading_from_rotation(
-            rotation
-        )
+    heading_rad = math.radians(
+        reference_heading
     )
 
-
-    movement = float(
-        np.linalg.norm(
-            translation
-        )
+    cos_h = math.cos(
+        heading_rad
     )
 
-
-    if (
-        rotation_amount
-        >=
-        STRONG_ROTATION_MIN_ANGLE_DEG
-        and
-        movement
-        <=
-        STRONG_ROTATION_MAX_TRANSLATION_M
-    ):
-
-        return True
-
-
-    if (
-        rotation_amount
-        >=
-        ROTATION_ONLY_MIN_ANGLE_DEG
-        and
-        movement
-        <=
-        ROTATION_ONLY_MAX_TRANSLATION_M
-    ):
-
-        return True
-
-
-    return False
-
-
-# ============================================================
-# REMOVE FALSE TRANSLATION DURING ROTATION
-# ============================================================
-
-def filter_relative_motion(
-        rotation,
-        translation):
-
-    global rotation_filter_count
-
-    global last_relative_translation
-
-    global last_relative_rotation
-
-    global last_rotation_filter_active
-
-
-    movement = float(
-        np.linalg.norm(
-            translation
-        )
+    sin_h = math.sin(
+        heading_rad
     )
 
-
-    rotation_amount = abs(
-        get_heading_from_rotation(
-            rotation
-        )
+    local_x = float(
+        local_translation[0]
     )
 
-
-    last_relative_translation = (
-        movement
+    local_y = float(
+        local_translation[1]
     )
 
-
-    last_relative_rotation = (
-        rotation_amount
-    )
-
-
-    if is_rotation_dominant(
-        rotation,
-        translation
-    ):
-
-        rotation_filter_count += 1
-
-
-        last_rotation_filter_active = True
-
-
-        return (
-            rotation,
-
-            np.array(
-                [
-                    0.0,
-                    0.0
-                ],
-                dtype=float
-            ),
-
-            True
-        )
-
-
-    last_rotation_filter_active = False
-
-
-    return (
-        rotation,
-        translation.copy(),
-        False
-    )
-
-
-# ============================================================
-# REFERENCE -> GLOBAL LIDAR POSE
-# ============================================================
-
-def calculate_pose_from_reference(
-        reference_rotation,
-        reference_translation,
-        relative_rotation,
-        relative_translation):
-
-    new_rotation = (
-        reference_rotation
-        @
-        relative_rotation
-    )
-
-
-    new_translation = (
-        reference_translation
+    world_x = (
+        local_x
+        *
+        cos_h
         +
-        reference_rotation
-        @
-        relative_translation
+        local_y
+        *
+        sin_h
     )
 
-
-    return (
-        new_rotation,
-        new_translation
-    )
-
-
-# ============================================================
-# SET LIDAR POSE
-# ============================================================
-
-def set_lidar_pose(
-        rotation,
-        translation,
-        allow_stationary_lock=True):
-
-    global lidar_rotation
-
-    global lidar_translation
-
-    global lidar_x
-
-    global lidar_y
-
-    global lidar_heading
-
-    global pose_locked
-
-
-    proposed_x = float(
-        translation[0]
-    )
-
-
-    proposed_y = float(
-        translation[1]
-    )
-
-
-    proposed_heading = (
-        get_heading_from_rotation(
-            rotation
-        )
-    )
-
-
-    movement = math.sqrt(
-        (
-            proposed_x
-            -
-            lidar_x
-        ) ** 2
+    world_y = (
+        -local_x
+        *
+        sin_h
         +
-        (
-            proposed_y
-            -
-            lidar_y
-        ) ** 2
+        local_y
+        *
+        cos_h
     )
 
-
-    heading_change = (
-        heading_difference(
-            proposed_heading,
-            lidar_heading
-        )
+    return np.array(
+        [
+            world_x,
+            world_y
+        ],
+        dtype=float
     )
-
-
-    # ========================================================
-    # STATIONARY LOCK
-    # ========================================================
-
-    if (
-        allow_stationary_lock
-        and
-        movement
-        <
-        STATIONARY_TRANSLATION_M
-        and
-        heading_change
-        <
-        STATIONARY_ROTATION_DEG
-    ):
-
-        pose_locked = True
-
-
-        update_robot_pose_from_lidar()
-
-
-        return
-
-
-    # ========================================================
-    # ACCEPT POSE
-    # ========================================================
-
-    lidar_rotation = (
-        rotation.copy()
-    )
-
-
-    lidar_translation = (
-        translation.copy()
-    )
-
-
-    lidar_x = proposed_x
-
-    lidar_y = proposed_y
-
-    lidar_heading = (
-        proposed_heading
-    )
-
-
-    pose_locked = False
-
-
-    update_robot_pose_from_lidar()
 
 
 # ============================================================
@@ -1645,24 +1218,19 @@ def store_previous_good_scan(
         scan):
 
     global previous_good_scan
-
-    global previous_good_rotation
-
     global previous_good_translation
-
+    global previous_navx_heading
 
     previous_good_scan = (
         scan.copy()
     )
 
-
-    previous_good_rotation = (
-        lidar_rotation.copy()
+    previous_good_translation = (
+        robot_translation.copy()
     )
 
-
-    previous_good_translation = (
-        lidar_translation.copy()
+    previous_navx_heading = (
+        robot_heading
     )
 
 
@@ -1674,28 +1242,21 @@ def create_keyframe(
         scan):
 
     global keyframe_scan
-
-    global keyframe_rotation
-
     global keyframe_translation
-
+    global keyframe_navx_heading
     global keyframe_number
-
 
     keyframe_scan = (
         scan.copy()
     )
 
-
-    keyframe_rotation = (
-        lidar_rotation.copy()
-    )
-
-
     keyframe_translation = (
-        lidar_translation.copy()
+        robot_translation.copy()
     )
 
+    keyframe_navx_heading = (
+        robot_heading
+    )
 
     keyframe_number += 1
 
@@ -1706,35 +1267,20 @@ def create_keyframe(
 
 def keyframe_needed():
 
-    movement = math.sqrt(
-        (
-            lidar_x
+    movement = float(
+        np.linalg.norm(
+            robot_translation
             -
-            keyframe_translation[0]
-        ) ** 2
-        +
-        (
-            lidar_y
-            -
-            keyframe_translation[1]
-        ) ** 2
-    )
-
-
-    key_heading = (
-        get_heading_from_rotation(
-            keyframe_rotation
+            keyframe_translation
         )
     )
 
-
-    heading_change = (
+    heading_change = abs(
         heading_difference(
-            lidar_heading,
-            key_heading
+            robot_heading,
+            keyframe_navx_heading
         )
     )
-
 
     return (
         movement
@@ -1748,64 +1294,70 @@ def keyframe_needed():
 
 
 # ============================================================
-# SHOULD WE EVEN TRY KEYFRAME CORRECTION?
-#
-# Prevent correction counter from going crazy when stationary.
-# ============================================================
-
-def meaningful_motion_for_keyframe_correction(
-        relative_rotation,
-        relative_translation):
-
-    movement = float(
-        np.linalg.norm(
-            relative_translation
-        )
-    )
-
-
-    rotation_amount = abs(
-        get_heading_from_rotation(
-            relative_rotation
-        )
-    )
-
-
-    return (
-        movement
-        >=
-        MIN_KEYFRAME_CORRECTION_TRANSLATION_M
-        or
-        rotation_amount
-        >=
-        MIN_KEYFRAME_CORRECTION_ROTATION_DEG
-    )
-
-
-# ============================================================
 # LOCALIZATION
+#
+# navX = heading
+# LiDAR = translation
 # ============================================================
 
 def track_localization(
         current_scan):
 
-    global localization_valid
+    global robot_x
+    global robot_y
+    global robot_heading
+    global robot_translation
 
+    # ========================================================
+    # FIX FOR YOUR UnboundLocalError
+    # ========================================================
+
+    global previous_good_scan
+    global previous_good_translation
+    global previous_navx_heading
+
+    global localization_valid
     global localization_state
+    global pose_locked
 
     global recovery_count
-
-    global keyframe_correction_count
-
-    global rotation_filter_count
-
+    global rotation_hold_count
     global consecutive_hold_count
 
     global last_icp_error
-
     global last_inlier_ratio
+    global last_relative_translation
+    global last_navx_delta
 
-    global pose_locked
+
+    # ========================================================
+    # READ NAVX
+    # ========================================================
+
+    current_heading = (
+        get_relative_navx_heading()
+    )
+
+    if current_heading is None:
+
+        localization_valid = False
+
+        localization_state = (
+            "NO_NAVX"
+        )
+
+        consecutive_hold_count += 1
+
+        return
+
+
+    # ========================================================
+    # NAVX IS HEADING AUTHORITY
+    # ========================================================
+
+    robot_heading = (
+        current_heading
+    )
 
 
     # ========================================================
@@ -1814,120 +1366,197 @@ def track_localization(
 
     if previous_good_scan is None:
 
-        set_lidar_pose(
-            np.eye(2),
-
-            np.array(
-                [
-                    0.0,
-                    0.0
-                ],
-                dtype=float
-            ),
-
-            False
+        robot_translation = np.array(
+            [
+                0.0,
+                0.0
+            ],
+            dtype=float
         )
 
+        robot_x = 0.0
+
+        robot_y = 0.0
 
         localization_valid = True
-
 
         localization_state = (
             "INITIALIZED"
         )
 
+        pose_locked = True
 
         consecutive_hold_count = 0
-
 
         store_previous_good_scan(
             current_scan
         )
 
-
         create_keyframe(
             current_scan
         )
-
 
         return
 
 
     # ========================================================
-    # PRIMARY:
-    #
-    # CURRENT SCAN -> PREVIOUS GOOD SCAN
+    # HEADING CHANGE SINCE PREVIOUS SCAN
     # ========================================================
 
-    (
-        prev_rotation,
-        prev_translation,
-        prev_success,
-        prev_error,
-        prev_ratio
-    ) = normal_icp(
-        current_scan,
-        previous_good_scan
+    navx_delta = heading_difference(
+        robot_heading,
+        previous_navx_heading
+    )
+
+    last_navx_delta = (
+        navx_delta
     )
 
 
-    previous_match_good = (
-        prev_success
+    # ========================================================
+    # PURE Q/E ROTATION
+    #
+    # Heading changes from navX.
+    # X/Y stay fixed.
+    # ========================================================
+
+    if pure_rotation_commanded():
+
+        localization_valid = True
+
+        localization_state = (
+            "NAVX_ROTATING"
+        )
+
+        pose_locked = False
+
+        last_relative_translation = (
+            0.0
+        )
+
+        rotation_hold_count += 1
+
+        consecutive_hold_count = 0
+
+
+        # ====================================================
+        # KEEP SCAN REFERENCE UPDATED DURING ROTATION
+        # ====================================================
+
+        previous_good_scan = (
+            current_scan.copy()
+        )
+
+        previous_good_translation = (
+            robot_translation.copy()
+        )
+
+        previous_navx_heading = (
+            robot_heading
+        )
+
+
+        # ====================================================
+        # REFRESH KEYFRAME AFTER ENOUGH ROTATION
+        # ====================================================
+
+        if (
+            abs(
+                heading_difference(
+                    robot_heading,
+                    keyframe_navx_heading
+                )
+            )
+            >=
+            KEYFRAME_ROTATION_DEG
+        ):
+
+            create_keyframe(
+                current_scan
+            )
+
+        return
+
+
+    # ========================================================
+    # NORMAL LIDAR TRANSLATION
+    # ========================================================
+
+    (
+        relative_translation,
+        success,
+        error,
+        inlier_ratio
+    ) = normal_translation_match(
+        current_scan,
+        previous_good_scan,
+        navx_delta
+    )
+
+    last_icp_error = (
+        error
+    )
+
+    last_inlier_ratio = (
+        inlier_ratio
+    )
+
+    normal_good = (
+        success
         and
-        transform_quality_good(
-            prev_rotation,
-            prev_translation,
-            prev_error,
-            prev_ratio,
+        translation_quality_good(
+            relative_translation,
+            error,
+            inlier_ratio,
             False
         )
     )
 
 
     # ========================================================
-    # PRIMARY SUCCESS
+    # NORMAL SUCCESS
     # ========================================================
 
-    if previous_match_good:
+    if normal_good:
 
-        (
-            filtered_rotation,
-            filtered_translation,
-            rotation_filtered
-        ) = filter_relative_motion(
-            prev_rotation,
-            prev_translation
+        relative_distance = float(
+            np.linalg.norm(
+                relative_translation
+            )
+        )
+
+        last_relative_translation = (
+            relative_distance
         )
 
 
-        (
-            candidate_rotation,
-            candidate_translation
-        ) = calculate_pose_from_reference(
-            previous_good_rotation,
-            previous_good_translation,
+        # ====================================================
+        # BACKUP ROTATION SUPPRESSION
+        # ====================================================
 
-            filtered_rotation,
-            filtered_translation
-        )
+        if (
+            abs(navx_delta)
+            >=
+            ROTATION_SUPPRESSION_MIN_DEG
+            and
+            relative_distance
+            <=
+            ROTATION_SUPPRESSION_MAX_TRANSLATION_M
+        ):
 
-
-        last_icp_error = (
-            prev_error
-        )
-
-
-        last_inlier_ratio = (
-            prev_ratio
-        )
-
-
-        if rotation_filtered:
-
-            localization_state = (
-                "ROTATING"
+            relative_translation = np.array(
+                [
+                    0.0,
+                    0.0
+                ],
+                dtype=float
             )
 
+            localization_state = (
+                "ROTATION_HOLD_XY"
+            )
+
+            rotation_hold_count += 1
 
         else:
 
@@ -1937,189 +1566,55 @@ def track_localization(
 
 
         # ====================================================
-        # ONLY TRY KEYFRAME CORRECTION IF THERE WAS
-        # MEANINGFUL MOTION
+        # TRANSLATION -> WORLD
         # ====================================================
 
-        allow_keyframe_correction = (
-            meaningful_motion_for_keyframe_correction(
-                prev_rotation,
-                prev_translation
-            )
+        world_delta = local_translation_to_world(
+            relative_translation,
+            previous_navx_heading
         )
 
+
+        # ====================================================
+        # REMOVE MICRO MOVEMENT
+        # ====================================================
 
         if (
-            keyframe_scan is not None
-            and
-            allow_keyframe_correction
+            np.linalg.norm(
+                world_delta
+            )
+            <
+            STATIONARY_TRANSLATION_M
         ):
 
-            (
-                key_rotation,
-                key_translation,
-                key_success,
-                key_error,
-                key_ratio
-            ) = normal_icp(
-                current_scan,
-                keyframe_scan
+            world_delta = np.array(
+                [
+                    0.0,
+                    0.0
+                ],
+                dtype=float
             )
 
+            pose_locked = True
 
-            key_match_good = (
-                key_success
-                and
-                transform_quality_good(
-                    key_rotation,
-                    key_translation,
-                    key_error,
-                    key_ratio,
-                    False
-                )
-            )
+        else:
+
+            pose_locked = False
 
 
-            if key_match_good:
-
-                (
-                    corrected_rotation,
-                    corrected_translation
-                ) = calculate_pose_from_reference(
-                    keyframe_rotation,
-                    keyframe_translation,
-
-                    key_rotation,
-                    key_translation
-                )
-
-
-                candidate_heading = (
-                    get_heading_from_rotation(
-                        candidate_rotation
-                    )
-                )
-
-
-                corrected_heading = (
-                    get_heading_from_rotation(
-                        corrected_rotation
-                    )
-                )
-
-
-                position_difference = float(
-                    np.linalg.norm(
-                        corrected_translation
-                        -
-                        candidate_translation
-                    )
-                )
-
-
-                heading_diff = (
-                    heading_difference(
-                        corrected_heading,
-                        candidate_heading
-                    )
-                )
-
-
-                # ============================================
-                # ROTATION:
-                #
-                # correct heading only
-                #
-                # NEVER let the keyframe move X/Y.
-                # ============================================
-
-                if rotation_filtered:
-
-                    if (
-                        heading_diff
-                        <=
-                        KEYFRAME_CORRECTION_MAX_HEADING_DIFF_DEG
-                    ):
-
-                        candidate_rotation = (
-                            corrected_rotation
-                        )
-
-
-                        localization_state = (
-                            "ROTATION_CORRECTED"
-                        )
-
-
-                        keyframe_correction_count += 1
-
-
-                        last_icp_error = (
-                            key_error
-                        )
-
-
-                        last_inlier_ratio = (
-                            key_ratio
-                        )
-
-
-                # ============================================
-                # TRANSLATION:
-                #
-                # full correction only when both agree.
-                # ============================================
-
-                else:
-
-                    if (
-                        position_difference
-                        <=
-                        KEYFRAME_CORRECTION_MAX_POSITION_DIFF_M
-                        and
-                        heading_diff
-                        <=
-                        KEYFRAME_CORRECTION_MAX_HEADING_DIFF_DEG
-                    ):
-
-                        candidate_rotation = (
-                            corrected_rotation
-                        )
-
-
-                        candidate_translation = (
-                            corrected_translation
-                        )
-
-
-                        localization_state = (
-                            "KEYFRAME_CORRECTED"
-                        )
-
-
-                        keyframe_correction_count += 1
-
-
-                        last_icp_error = (
-                            key_error
-                        )
-
-
-                        last_inlier_ratio = (
-                            key_ratio
-                        )
-
-
-        # ====================================================
-        # APPLY TRUSTED POSE
-        # ====================================================
-
-        set_lidar_pose(
-            candidate_rotation,
-            candidate_translation,
-            True
+        robot_translation = (
+            previous_good_translation
+            +
+            world_delta
         )
 
+        robot_x = float(
+            robot_translation[0]
+        )
+
+        robot_y = float(
+            robot_translation[1]
+        )
 
         localization_valid = True
 
@@ -2127,7 +1622,7 @@ def track_localization(
 
 
         # ====================================================
-        # CURRENT SCAN BECOMES NEW PREVIOUS GOOD SCAN
+        # STORE CURRENT AS NEW REFERENCE
         # ====================================================
 
         store_previous_good_scan(
@@ -2135,45 +1630,43 @@ def track_localization(
         )
 
 
-        # ====================================================
-        # KEYFRAME UPDATE
-        # ====================================================
-
         if keyframe_needed():
 
             create_keyframe(
                 current_scan
             )
 
-
         return
 
 
     # ========================================================
-    # PRIMARY FAILED
-    #
-    # TRY RECOVERY FROM KEYFRAME
+    # NORMAL FAILED -> KEYFRAME RECOVERY
     # ========================================================
 
     if keyframe_scan is not None:
 
+        keyframe_heading_delta = (
+            heading_difference(
+                robot_heading,
+                keyframe_navx_heading
+            )
+        )
+
         (
-            recovery_rotation,
             recovery_translation,
             recovery_success,
             recovery_error,
             recovery_ratio
-        ) = recovery_icp(
+        ) = recovery_translation_match(
             current_scan,
-            keyframe_scan
+            keyframe_scan,
+            keyframe_heading_delta
         )
-
 
         recovery_good = (
             recovery_success
             and
-            transform_quality_good(
-                recovery_rotation,
+            translation_quality_good(
                 recovery_translation,
                 recovery_error,
                 recovery_ratio,
@@ -2181,44 +1674,44 @@ def track_localization(
             )
         )
 
-
         if recovery_good:
 
-            (
-                recovered_rotation,
-                recovered_translation
-            ) = calculate_pose_from_reference(
-                keyframe_rotation,
-                keyframe_translation,
-
-                recovery_rotation,
-                recovery_translation
+            recovery_distance = float(
+                np.linalg.norm(
+                    recovery_translation
+                )
             )
 
 
             # =================================================
             # ROTATION RECOVERY
-            #
-            # HOLD X/Y.
             # =================================================
 
-            if is_rotation_dominant(
-                recovery_rotation,
-                recovery_translation
+            if (
+                abs(
+                    keyframe_heading_delta
+                )
+                >=
+                ROTATION_SUPPRESSION_MIN_DEG
+                and
+                recovery_distance
+                <=
+                ROTATION_SUPPRESSION_MAX_TRANSLATION_M
             ):
 
-                recovered_translation = (
-                    lidar_translation.copy()
+                recovery_translation = np.array(
+                    [
+                        0.0,
+                        0.0
+                    ],
+                    dtype=float
                 )
-
 
                 localization_state = (
-                    "ROTATION_RECOVERED"
+                    "NAVX_ROTATION_RECOVERED"
                 )
 
-
-                rotation_filter_count += 1
-
+                rotation_hold_count += 1
 
             else:
 
@@ -2227,40 +1720,52 @@ def track_localization(
                 )
 
 
-            set_lidar_pose(
-                recovered_rotation,
-                recovered_translation,
-                False
+            world_delta = local_translation_to_world(
+                recovery_translation,
+                keyframe_navx_heading
             )
 
+            robot_translation = (
+                keyframe_translation
+                +
+                world_delta
+            )
+
+            robot_x = float(
+                robot_translation[0]
+            )
+
+            robot_y = float(
+                robot_translation[1]
+            )
 
             localization_valid = True
 
+            pose_locked = False
 
             recovery_count += 1
 
             consecutive_hold_count = 0
 
-
             last_icp_error = (
                 recovery_error
             )
-
 
             last_inlier_ratio = (
                 recovery_ratio
             )
 
+            last_relative_translation = (
+                recovery_distance
+            )
 
             store_previous_good_scan(
                 current_scan
             )
 
-
             create_keyframe(
                 current_scan
             )
-
 
             return
 
@@ -2268,23 +1773,26 @@ def track_localization(
     # ========================================================
     # HOLD
     #
-    # X / Y / Heading remain exactly where last trusted.
+    # X/Y stay at the last trusted position.
+    #
+    # Heading continues following navX.
     # ========================================================
 
     localization_valid = False
 
-    localization_state = "HOLD"
+    localization_state = (
+        "XY_HOLD_NAVX_OK"
+    )
 
     pose_locked = True
-
 
     consecutive_hold_count += 1
 
 
 # ============================================================
-# LOCAL LIDAR POINTS -> WORLD
+# LOCAL POINTS -> WORLD
 #
-# Map uses RAW LiDAR pose internally.
+# Uses navX heading.
 # ============================================================
 
 def local_to_world(
@@ -2296,24 +1804,20 @@ def local_to_world(
             (0, 2)
         )
 
-
     heading_rad = math.radians(
-        lidar_heading
+        robot_heading
     )
-
 
     cos_h = math.cos(
         heading_rad
     )
 
-
     sin_h = math.sin(
         heading_rad
     )
 
-
     world_x = (
-        lidar_x
+        robot_x
         +
         local_points[:, 0]
         *
@@ -2324,9 +1828,8 @@ def local_to_world(
         sin_h
     )
 
-
     world_y = (
-        lidar_y
+        robot_y
         -
         local_points[:, 0]
         *
@@ -2337,7 +1840,6 @@ def local_to_world(
         cos_h
     )
 
-
     return np.column_stack(
         (
             world_x,
@@ -2347,7 +1849,7 @@ def local_to_world(
 
 
 # ============================================================
-# LIVE CLUSTERS
+# LIVE CLUSTER FILTER
 # ============================================================
 
 def find_live_clusters(
@@ -2355,16 +1857,13 @@ def find_live_clusters(
 
     clusters = []
 
-
     if len(local_points) == 0:
 
         return clusters
 
-
     current_cluster = [
         local_points[0]
     ]
-
 
     for index in range(
         1,
@@ -2377,13 +1876,15 @@ def find_live_clusters(
             local_points[index - 1]
         )
 
-
-        if gap <= LIVE_CLUSTER_GAP_M:
+        if (
+            gap
+            <=
+            LIVE_CLUSTER_GAP_M
+        ):
 
             current_cluster.append(
                 local_points[index]
             )
-
 
         else:
 
@@ -2399,11 +1900,9 @@ def find_live_clusters(
                     )
                 )
 
-
             current_cluster = [
                 local_points[index]
             ]
-
 
     if (
         len(current_cluster)
@@ -2417,7 +1916,6 @@ def find_live_clusters(
             )
         )
 
-
     return clusters
 
 
@@ -2429,7 +1927,6 @@ def clusters_to_points(
         return np.empty(
             (0, 2)
         )
-
 
     return np.vstack(
         clusters
@@ -2445,14 +1942,11 @@ def update_occupancy_grid(
 
     global occupancy_grid
 
-
     if len(world_points) == 0:
 
         return
 
-
     seen = set()
-
 
     for point in world_points:
 
@@ -2464,7 +1958,6 @@ def update_occupancy_grid(
             )
         )
 
-
         grid_y = int(
             round(
                 point[1]
@@ -2473,37 +1966,30 @@ def update_occupancy_grid(
             )
         )
 
-
         key = (
             grid_x,
             grid_y
         )
 
-
         if key in seen:
 
             continue
 
-
         seen.add(
             key
         )
-
 
         confidence = occupancy_grid.get(
             key,
             0
         )
 
-
         confidence += 1
-
 
         confidence = min(
             confidence,
             MAX_CELL_CONFIDENCE
         )
-
 
         occupancy_grid[
             key
@@ -2513,7 +1999,6 @@ def update_occupancy_grid(
 def get_confirmed_map_points():
 
     points = []
-
 
     for (
         key,
@@ -2538,13 +2023,11 @@ def get_confirmed_map_points():
                 ]
             )
 
-
     if len(points) == 0:
 
         return np.empty(
             (0, 2)
         )
-
 
     return np.array(
         points,
@@ -2569,12 +2052,10 @@ def get_nearest_obstacle(
             0.0
         )
 
-
     distances = np.linalg.norm(
         local_points,
         axis=1
     )
-
 
     index = int(
         np.argmin(
@@ -2582,32 +2063,28 @@ def get_nearest_obstacle(
         )
     )
 
-
-    local = local_points[
+    local_point = local_points[
         index
     ]
 
-
-    world = world_points[
+    world_point = world_points[
         index
     ]
-
 
     angle = math.degrees(
         math.atan2(
-            local[0],
-            local[1]
+            local_point[0],
+            local_point[1]
         )
     )
 
-
     return (
         float(
-            world[0]
+            world_point[0]
         ),
 
         float(
-            world[1]
+            world_point[1]
         ),
 
         float(
@@ -2627,27 +2104,21 @@ def get_nearest_obstacle(
 def log_current_position():
 
     global position_counter
-
     global last_log_message
 
-
-    if not localization_valid:
+    if not navx_available:
 
         last_log_message = (
-            "LOG FAILED - LOCALIZATION HOLD"
+            "LOG FAILED - NAVX NOT AVAILABLE"
         )
-
 
         print(
             last_log_message
         )
 
-
         return
 
-
     position_counter += 1
-
 
     position_name = (
         "P"
@@ -2657,11 +2128,9 @@ def log_current_position():
         )
     )
 
-
     timestamp = time.strftime(
         "%Y-%m-%d %H:%M:%S"
     )
-
 
     position = {
         "name": position_name,
@@ -2671,11 +2140,9 @@ def log_current_position():
         "timestamp": timestamp
     }
 
-
     logged_positions.append(
         position
     )
-
 
     with open(
         POSITION_LOG_FILE,
@@ -2687,7 +2154,6 @@ def log_current_position():
             file
         )
 
-
         writer.writerow(
             [
                 position_name,
@@ -2698,14 +2164,12 @@ def log_current_position():
             ]
         )
 
-
     last_log_message = (
         f"{position_name} "
         f"X={robot_x:.2f} "
         f"Y={robot_y:.2f} "
         f"H={robot_heading:.1f}°"
     )
-
 
     print(
         last_log_message
@@ -2722,123 +2186,90 @@ def publish_localization(
         obstacle_distance,
         obstacle_angle):
 
-    # ========================================================
-    # STABLE ROBOT POSE
-    # ========================================================
-
     localization_table.putNumber(
         "RobotX",
         robot_x
     )
-
 
     localization_table.putNumber(
         "RobotY",
         robot_y
     )
 
-
     localization_table.putNumber(
         "RobotHeading",
         robot_heading
     )
 
-
-    # ========================================================
-    # RAW INTERNAL LIDAR POSE
-    # ========================================================
-
     localization_table.putNumber(
-        "LidarX",
-        lidar_x
+        "NavXRawHeading",
+        raw_navx_heading
     )
 
-
     localization_table.putNumber(
-        "LidarY",
-        lidar_y
+        "NavXZeroOffset",
+        navx_zero_offset
     )
 
-
     localization_table.putNumber(
-        "LidarHeading",
-        lidar_heading
+        "NavXDelta",
+        last_navx_delta
     )
 
-
-    # ========================================================
-    # OBSTACLE
-    # ========================================================
+    localization_table.putBoolean(
+        "NavXAvailable",
+        navx_available
+    )
 
     localization_table.putNumber(
         "ObstacleX",
         obstacle_x
     )
 
-
     localization_table.putNumber(
         "ObstacleY",
         obstacle_y
     )
-
 
     localization_table.putNumber(
         "ObstacleDistance",
         obstacle_distance
     )
 
-
     localization_table.putNumber(
         "ObstacleAngle",
         obstacle_angle
     )
-
-
-    # ========================================================
-    # STATUS
-    # ========================================================
 
     localization_table.putString(
         "LocalizationState",
         localization_state
     )
 
-
     localization_table.putBoolean(
         "LocalizationValid",
         localization_valid
     )
-
 
     localization_table.putNumber(
         "RecoveryCount",
         recovery_count
     )
 
-
     localization_table.putNumber(
-        "RotationFilterCount",
-        rotation_filter_count
+        "RotationHoldCount",
+        rotation_hold_count
     )
-
-
-    localization_table.putNumber(
-        "KeyframeCorrectionCount",
-        keyframe_correction_count
-    )
-
 
     localization_table.putNumber(
         "HoldCount",
         consecutive_hold_count
     )
 
-
     localization_table.putNumber(
         "ICPError",
         last_icp_error
     )
-
 
     localization_table.putNumber(
         "ICPInlierRatio",
@@ -2854,7 +2285,6 @@ def save_map():
 
     points = get_confirmed_map_points()
 
-
     if len(points) == 0:
 
         print(
@@ -2863,11 +2293,9 @@ def save_map():
 
         return
 
-
     timestamp = time.strftime(
         "%Y%m%d_%H%M%S"
     )
-
 
     csv_path = os.path.join(
         MAP_SAVE_FOLDER,
@@ -2878,7 +2306,6 @@ def save_map():
         ".csv"
     )
 
-
     png_path = os.path.join(
         MAP_SAVE_FOLDER,
         "lidar_map_"
@@ -2887,11 +2314,6 @@ def save_map():
         +
         ".png"
     )
-
-
-    # ========================================================
-    # CSV
-    # ========================================================
 
     with open(
         csv_path,
@@ -2903,14 +2325,12 @@ def save_map():
             file
         )
 
-
         writer.writerow(
             [
                 "X_m",
                 "Y_m"
             ]
         )
-
 
         for point in points:
 
@@ -2921,15 +2341,9 @@ def save_map():
                 ]
             )
 
-
-    # ========================================================
-    # PNG
-    # ========================================================
-
     save_fig, save_axis = plt.subplots(
         figsize=(9, 9)
     )
-
 
     save_axis.scatter(
         points[:, 0],
@@ -2939,7 +2353,6 @@ def save_map():
         marker="s"
     )
 
-
     for position in logged_positions:
 
         save_axis.scatter(
@@ -2948,7 +2361,6 @@ def save_map():
             s=60,
             marker="o"
         )
-
 
         save_axis.text(
             position["x"],
@@ -2962,7 +2374,6 @@ def save_map():
             ha="center"
         )
 
-
     save_axis.scatter(
         robot_x,
         robot_y,
@@ -2970,27 +2381,22 @@ def save_map():
         marker="^"
     )
 
-
     save_axis.set_aspect(
         "equal",
         adjustable="box"
     )
 
-
     save_axis.set_xlabel(
         "World X (m)"
     )
-
 
     save_axis.set_ylabel(
         "World Y (m)"
     )
 
-
     save_axis.set_title(
-        "LiDAR Confirmed Map"
+        "LiDAR + navX Localization Map"
     )
-
 
     save_fig.savefig(
         png_path,
@@ -2998,21 +2404,17 @@ def save_map():
         bbox_inches="tight"
     )
 
-
     plt.close(
         save_fig
     )
 
-
     print(
-        "MAP SAVED:"
+        "MAP SAVED"
     )
-
 
     print(
         csv_path
     )
-
 
     print(
         png_path
@@ -3021,98 +2423,61 @@ def save_map():
 
 # ============================================================
 # RESET
+#
+# R:
+#
+# X = 0
+# Y = 0
+# current heading = 0°
+# clear map
+# clear scan references
 # ============================================================
 
 def reset_localization():
 
-    global lidar_x
-
-    global lidar_y
-
-    global lidar_heading
-
-    global lidar_rotation
-
-    global lidar_translation
-
-
     global robot_x
-
     global robot_y
-
     global robot_heading
-
-
-    global stable_robot_heading
-
-    global stable_heading_initialized
-
+    global robot_translation
 
     global previous_good_scan
-
-    global previous_good_rotation
-
     global previous_good_translation
-
+    global previous_navx_heading
 
     global keyframe_scan
-
-    global keyframe_rotation
-
     global keyframe_translation
-
+    global keyframe_navx_heading
     global keyframe_number
 
-
     global localization_valid
-
     global localization_state
-
     global pose_locked
 
-
     global recovery_count
-
-    global keyframe_correction_count
-
-    global rotation_filter_count
-
+    global rotation_hold_count
     global consecutive_hold_count
-
 
     global frame_counter
 
-
     global last_icp_error
-
     global last_inlier_ratio
-
-
     global last_relative_translation
-
-    global last_relative_rotation
-
-    global last_rotation_filter_active
-
+    global last_navx_delta
 
     global occupancy_grid
 
 
     # ========================================================
-    # LIDAR
+    # RESET ROBOT POSITION
     # ========================================================
 
-    lidar_x = 0.0
+    robot_x = 0.0
 
-    lidar_y = 0.0
+    robot_y = 0.0
 
-    lidar_heading = 0.0
+    robot_heading = 0.0
 
-
-    lidar_rotation = np.eye(2)
-
-
-    lidar_translation = np.array(
+    robot_translation = np.array(
         [
             0.0,
             0.0
@@ -3122,34 +2487,17 @@ def reset_localization():
 
 
     # ========================================================
-    # ROBOT
+    # RESET NAVX ZERO
     # ========================================================
 
-    robot_x = 0.0
-
-    robot_y = 0.0
-
-    robot_heading = 0.0
+    reset_python_navx_zero()
 
 
     # ========================================================
-    # HEADING FILTER
-    # ========================================================
-
-    stable_robot_heading = 0.0
-
-    stable_heading_initialized = False
-
-
-    # ========================================================
-    # PREVIOUS SCAN
+    # RESET SCAN REFERENCES
     # ========================================================
 
     previous_good_scan = None
-
-
-    previous_good_rotation = np.eye(2)
-
 
     previous_good_translation = np.array(
         [
@@ -3159,16 +2507,14 @@ def reset_localization():
         dtype=float
     )
 
+    previous_navx_heading = 0.0
+
 
     # ========================================================
-    # KEYFRAME
+    # RESET KEYFRAME
     # ========================================================
 
     keyframe_scan = None
-
-
-    keyframe_rotation = np.eye(2)
-
 
     keyframe_translation = np.array(
         [
@@ -3178,58 +2524,69 @@ def reset_localization():
         dtype=float
     )
 
+    keyframe_navx_heading = 0.0
 
     keyframe_number = 0
 
 
     # ========================================================
-    # STATUS
+    # RESET STATUS
     # ========================================================
 
     localization_valid = False
 
     localization_state = (
-        "STARTING"
+        "RESETTING"
     )
 
-
-    pose_locked = False
-
+    pose_locked = True
 
     recovery_count = 0
 
-    keyframe_correction_count = 0
-
-    rotation_filter_count = 0
+    rotation_hold_count = 0
 
     consecutive_hold_count = 0
 
-
     frame_counter = 0
-
 
     last_icp_error = 999.0
 
     last_inlier_ratio = 0.0
 
-
     last_relative_translation = 0.0
 
-    last_relative_rotation = 0.0
-
-    last_rotation_filter_active = False
-
+    last_navx_delta = 0.0
 
     occupancy_grid = {}
 
 
     print(
-        "Localization reset."
+        "=========================================="
+    )
+
+    print(
+        "LOCALIZATION RESET"
+    )
+
+    print(
+        "X = 0"
+    )
+
+    print(
+        "Y = 0"
+    )
+
+    print(
+        "Current navX direction = 0 degrees"
+    )
+
+    print(
+        "=========================================="
     )
 
 
 # ============================================================
-# KEYBOARD
+# MATPLOTLIB KEYS
 # ============================================================
 
 def on_key(
@@ -3239,11 +2596,9 @@ def on_key(
 
         log_current_position()
 
-
     elif event.key == "s":
 
         save_map()
-
 
     elif event.key == "r":
 
@@ -3255,59 +2610,51 @@ def on_key(
 #
 # TOP:
 #
-# Live map | Persistent map
+# Live | Persistent Map
 #
 # BOTTOM:
 #
-# Information panel spanning full width.
+# Information
 # ============================================================
 
 plt.ion()
 
-
 fig = plt.figure(
     figsize=(15, 9)
 )
-
 
 grid = fig.add_gridspec(
     2,
     2,
     height_ratios=[
         4.0,
-        1.25
+        1.20
     ],
-    hspace=0.22,
+    hspace=0.24,
     wspace=0.18
 )
-
 
 ax_live = fig.add_subplot(
     grid[0, 0]
 )
 
-
 ax_map = fig.add_subplot(
     grid[0, 1]
 )
 
-
 ax_info = fig.add_subplot(
     grid[1, :]
 )
-
 
 fig.canvas.mpl_connect(
     "key_press_event",
     on_key
 )
 
-
 fig.suptitle(
-    "LiDAR Localization - Stable Pose + Yaw",
+    "LiDAR Translation + navX Heading Localization",
     fontsize=16
 )
-
 
 plt.show(
     block=False
@@ -3315,13 +2662,12 @@ plt.show(
 
 
 # ============================================================
-# DON'T FORCE WINDOW ALWAYS ON TOP
+# ALLOW ALT+TAB
 # ============================================================
 
 try:
 
     window = fig.canvas.manager.window
-
 
     if hasattr(
         window,
@@ -3332,7 +2678,6 @@ try:
             "-topmost",
             False
         )
-
 
 except Exception:
 
@@ -3347,34 +2692,28 @@ ax_live.set_title(
     "LIVE - Current Surroundings"
 )
 
-
 ax_live.set_xlabel(
     "World X (m)"
 )
 
-
 ax_live.set_ylabel(
     "World Y (m)"
 )
-
 
 ax_live.set_aspect(
     "equal",
     adjustable="box"
 )
 
-
 ax_live.set_xlim(
     -LIVE_HALF_RANGE_M,
     LIVE_HALF_RANGE_M
 )
 
-
 ax_live.set_ylim(
     -LIVE_HALF_RANGE_M,
     LIVE_HALF_RANGE_M
 )
-
 
 live_scatter = ax_live.scatter(
     [],
@@ -3384,7 +2723,6 @@ live_scatter = ax_live.scatter(
     marker="s"
 )
 
-
 live_robot, = ax_live.plot(
     [],
     [],
@@ -3392,7 +2730,6 @@ live_robot, = ax_live.plot(
     linestyle="None",
     markersize=10
 )
-
 
 live_heading_line, = ax_live.plot(
     [],
@@ -3409,34 +2746,28 @@ ax_map.set_title(
     "PERSISTENT - Confirmed Map"
 )
 
-
 ax_map.set_xlabel(
     "World X (m)"
 )
 
-
 ax_map.set_ylabel(
     "World Y (m)"
 )
-
 
 ax_map.set_aspect(
     "equal",
     adjustable="box"
 )
 
-
 ax_map.set_xlim(
     map_min_x,
     map_max_x
 )
 
-
 ax_map.set_ylim(
     map_min_y,
     map_max_y
 )
-
 
 map_scatter = ax_map.scatter(
     [],
@@ -3446,7 +2777,6 @@ map_scatter = ax_map.scatter(
     marker="s"
 )
 
-
 map_robot, = ax_map.plot(
     [],
     [],
@@ -3455,13 +2785,11 @@ map_robot, = ax_map.plot(
     markersize=10
 )
 
-
 map_heading_line, = ax_map.plot(
     [],
     [],
     linewidth=2
 )
-
 
 map_robot_label = ax_map.text(
     0.0,
@@ -3481,15 +2809,14 @@ map_robot_label = ax_map.text(
 
 
 # ============================================================
-# BOTTOM INFORMATION PANEL
+# INFORMATION PANEL
 # ============================================================
 
 ax_info.set_axis_off()
 
-
 info_text = ax_info.text(
     0.01,
-    0.92,
+    0.94,
     "",
     transform=ax_info.transAxes,
     ha="left",
@@ -3506,53 +2833,51 @@ info_text = ax_info.text(
 
 
 # ============================================================
-# START INFO
+# START INFORMATION
 # ============================================================
 
 print(
     "=========================================="
 )
 
-
 print(
-    "LIDAR LOCALIZATION"
+    "LIDAR + NAVX LOCALIZATION"
 )
-
-
-print(
-    "STABLE POSE + RESPONSIVE YAW"
-)
-
 
 print(
     "=========================================="
 )
 
+print(
+    "LiDAR = X/Y"
+)
 
 print(
-    "No reference wall required."
+    "navX = Heading"
+)
+
+print(
+    "R = X0 Y0 Heading0"
+)
+
+print(
+    "L = Log position"
+)
+
+print(
+    "S = Save map"
 )
 
 
-print(
-    "First scan = X0 Y0 Heading0."
+# ============================================================
+# INITIAL NAVX ZERO
+# ============================================================
+
+time.sleep(
+    0.25
 )
 
-
-print(
-    "Heading smoothing alpha:",
-    HEADING_SMOOTHING_ALPHA
-)
-
-
-print(
-    "Keyframe idle correction protection enabled."
-)
-
-
-print(
-    "Rotation translation suppression enabled."
-)
+reset_python_navx_zero()
 
 
 # ============================================================
@@ -3583,17 +2908,15 @@ try:
 
             fig.canvas.flush_events()
 
-
             time.sleep(
                 DISPLAY_UPDATE_TIME_S
             )
-
 
             continue
 
 
         # ====================================================
-        # POINT CLOUD
+        # LOCAL POINT CLOUD
         # ====================================================
 
         current_local_points = scan_to_xy(
@@ -3612,18 +2935,16 @@ try:
 
 
         # ====================================================
-        # OBJECT FILTERING
+        # FILTER ENVIRONMENT
         # ====================================================
 
         clusters = find_live_clusters(
             current_local_points
         )
 
-
         filtered_local_points = clusters_to_points(
             clusters
         )
-
 
         filtered_world_points = local_to_world(
             filtered_local_points
@@ -3635,7 +2956,6 @@ try:
         # ====================================================
 
         frame_counter += 1
-
 
         if (
             localization_valid
@@ -3650,7 +2970,6 @@ try:
             update_occupancy_grid(
                 filtered_world_points
             )
-
 
         confirmed_points = (
             get_confirmed_map_points()
@@ -3673,7 +2992,7 @@ try:
 
 
         # ====================================================
-        # NETWORKTABLE
+        # NETWORKTABLE OUTPUT
         # ====================================================
 
         publish_localization(
@@ -3685,13 +3004,12 @@ try:
 
 
         # ====================================================
-        # STABLE HEADING ARROW
+        # HEADING ARROW
         # ====================================================
 
         heading_rad = math.radians(
             robot_heading
         )
-
 
         heading_dx = (
             0.40
@@ -3700,7 +3018,6 @@ try:
                 heading_rad
             )
         )
-
 
         heading_dy = (
             0.40
@@ -3712,7 +3029,7 @@ try:
 
 
         # ====================================================
-        # LIVE ENVIRONMENT
+        # LIVE POINTS
         # ====================================================
 
         if len(
@@ -3722,7 +3039,6 @@ try:
             live_scatter.set_offsets(
                 filtered_world_points
             )
-
 
         else:
 
@@ -3741,7 +3057,6 @@ try:
             [robot_x],
             [robot_y]
         )
-
 
         live_heading_line.set_data(
             [
@@ -3773,7 +3088,6 @@ try:
                 robot_x
             )
 
-
             ax_live.set_xlim(
                 live_view_center_x
                 -
@@ -3799,7 +3113,6 @@ try:
                 robot_y
             )
 
-
             ax_live.set_ylim(
                 live_view_center_y
                 -
@@ -3812,7 +3125,7 @@ try:
 
 
         # ====================================================
-        # CONFIRMED MAP
+        # MAP POINTS
         # ====================================================
 
         if len(
@@ -3822,7 +3135,6 @@ try:
             map_scatter.set_offsets(
                 confirmed_points
             )
-
 
         else:
 
@@ -3842,7 +3154,6 @@ try:
             [robot_y]
         )
 
-
         map_heading_line.set_data(
             [
                 robot_x,
@@ -3854,14 +3165,12 @@ try:
             ]
         )
 
-
         map_robot_label.set_position(
             (
                 robot_x,
                 robot_y - 0.20
             )
         )
-
 
         map_robot_label.set_text(
             (
@@ -3874,8 +3183,15 @@ try:
 
 
         # ====================================================
-        # BOTTOM INFORMATION PANEL
+        # INFORMATION PANEL
         # ====================================================
+
+        navx_text = (
+            "YES"
+            if navx_available
+            else
+            "NO"
+        )
 
         valid_text = (
             "VALID"
@@ -3884,50 +3200,60 @@ try:
             "HOLD"
         )
 
+        rotating_text = (
+            "YES"
+            if pure_rotation_commanded()
+            else
+            "NO"
+        )
+
 
         info_text.set_text(
             (
-                "ROBOT POSE                    "
-                "LOCALIZATION                   "
-                "ICP / MOTION\n"
+                "FINAL ROBOT POSE               "
+                "NAVX HEADING                    "
+                "LIDAR TRANSLATION\n"
 
-                f"X: {robot_x:7.3f} m              "
-                f"State: {localization_state:<20} "
+                f"X: {robot_x:8.3f} m             "
+                f"Available: {navx_text:<18} "
+                f"State: {localization_state:<22}\n"
+
+                f"Y: {robot_y:8.3f} m             "
+                f"Raw yaw: {raw_navx_heading:8.2f}°        "
                 f"ICP error: {last_icp_error:7.3f} m\n"
 
-                f"Y: {robot_y:7.3f} m              "
-                f"Valid: {valid_text:<20} "
+                f"Heading: {robot_heading:8.2f}°           "
+                f"Python zero: {navx_zero_offset:8.2f}°    "
                 f"Inliers: {last_inlier_ratio * 100:6.1f}%\n"
 
-                f"Stable heading: {robot_heading:7.2f}°     "
-                f"Keyframe: {keyframe_number:<17} "
-                f"Relative move: {last_relative_translation:6.3f} m\n"
+                f"Valid: {valid_text:<20} "
+                f"Frame yaw delta: {last_navx_delta:7.2f}°    "
+                f"LiDAR move: {last_relative_translation:7.3f} m\n"
 
-                f"Raw heading:    {lidar_heading:7.2f}°     "
-                f"Corrections: {keyframe_correction_count:<16} "
-                f"Relative rotation: {last_relative_rotation:6.2f}°\n"
+                f"Pose lock: {str(pose_locked):<17} "
+                f"Q/E rotating: {rotating_text:<16} "
+                f"Keyframe: {keyframe_number}\n"
 
-                f"Pose lock: {str(pose_locked):<10}          "
-                f"Recoveries: {recovery_count:<17} "
-                f"Rotation filter: "
-                f"{'ON' if last_rotation_filter_active else 'OFF'}\n"
+                f"Nearest: {obstacle_distance:7.2f} m         "
+                f"Rotation holds: {rotation_hold_count:<13} "
+                f"Recoveries: {recovery_count}\n"
 
-                f"Nearest object: {obstacle_distance:6.2f} m       "
-                f"HOLD frames: {consecutive_hold_count:<16} "
-                f"Rotation filters: {rotation_filter_count}\n"
+                f"Logged positions: {len(logged_positions):<11} "
+                f"HOLD frames: {consecutive_hold_count:<15} "
+                f"Distance scale: {DISTANCE_SCALE_FACTOR:.2f}\n"
 
                 "\n"
 
-                "Controls:  "
-                "L = Log position    "
-                "S = Save map    "
-                "R = Reset localization"
+                "Controls:   "
+                "R = Reset X/Y/Heading to 0     "
+                "L = Log Position     "
+                "S = Save Map"
             )
         )
 
 
         # ====================================================
-        # MAP RANGE
+        # MAP AUTO-EXPAND
         # ====================================================
 
         if len(
@@ -3943,7 +3269,6 @@ try:
                 robot_x
             )
 
-
             required_max_x = max(
                 float(
                     np.max(
@@ -3952,7 +3277,6 @@ try:
                 ),
                 robot_x
             )
-
 
             required_min_y = min(
                 float(
@@ -3963,7 +3287,6 @@ try:
                 robot_y
             )
 
-
             required_max_y = max(
                 float(
                     np.max(
@@ -3972,7 +3295,6 @@ try:
                 ),
                 robot_y
             )
-
 
             changed = False
 
@@ -3991,7 +3313,6 @@ try:
                     MAP_EXPAND_MARGIN_M
                 )
 
-
                 changed = True
 
 
@@ -4008,7 +3329,6 @@ try:
                     +
                     MAP_EXPAND_MARGIN_M
                 )
-
 
                 changed = True
 
@@ -4027,7 +3347,6 @@ try:
                     MAP_EXPAND_MARGIN_M
                 )
 
-
                 changed = True
 
 
@@ -4045,7 +3364,6 @@ try:
                     MAP_EXPAND_MARGIN_M
                 )
 
-
                 changed = True
 
 
@@ -4055,7 +3373,6 @@ try:
                     map_min_x,
                     map_max_x
                 )
-
 
                 ax_map.set_ylim(
                     map_min_y,
@@ -4071,7 +3388,6 @@ try:
 
         fig.canvas.flush_events()
 
-
         time.sleep(
             DISPLAY_UPDATE_TIME_S
         )
@@ -4084,7 +3400,7 @@ try:
 except KeyboardInterrupt:
 
     print(
-        "\nLiDAR localization stopped."
+        "\nLocalization stopped."
     )
 
 
@@ -4095,12 +3411,10 @@ finally:
         False
     )
 
-
     localization_table.putString(
         "LocalizationState",
         "STOPPED"
     )
-
 
     print(
         "Localization closed."
