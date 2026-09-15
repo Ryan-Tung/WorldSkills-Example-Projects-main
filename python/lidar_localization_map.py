@@ -269,15 +269,52 @@ LIVE_MIN_CLUSTER_POINTS = 4
 
 # ============================================================
 # OCCUPANCY GRID
+#
+# Fixed Cartographer-style map:
+#
+# - 7 m x 7 m
+# - 5 cm per cell
+# - unknown starts grey
+# - LiDAR ray path adds FREE evidence
+# - LiDAR endpoint adds OCCUPIED evidence
+# - repeated free observations can remove old false obstacles
 # ============================================================
+
+MAP_SIZE_M = 7.0
 
 GRID_SIZE_M = 0.05
 
-OCCUPIED_CONFIRM_THRESHOLD = 3
+MAP_HALF_SIZE_M = (
+    MAP_SIZE_M
+    /
+    2.0
+)
 
-MAX_CELL_CONFIDENCE = 10
+MAP_CELL_COUNT = int(
+    round(
+        MAP_SIZE_M
+        /
+        GRID_SIZE_M
+    )
+)
+
+FREE_CELL_UPDATE = -1
+
+OCCUPIED_CELL_UPDATE = 2
+
+FREE_CELL_THRESHOLD = -1
+
+OCCUPIED_CONFIRM_THRESHOLD = 4
+
+MIN_CELL_CONFIDENCE = -12
+
+MAX_CELL_CONFIDENCE = 12
 
 MAP_UPDATE_EVERY_N_FRAMES = 2
+
+# Use every second filtered LiDAR point for ray tracing.
+# This keeps the map responsive without losing wall detail.
+MAP_RAY_STRIDE = 2
 
 
 # ============================================================
@@ -294,9 +331,10 @@ LIVE_HALF_RANGE_M = 5.0
 
 LIVE_RECENTER_THRESHOLD_M = 2.5
 
-MAP_INITIAL_HALF_RANGE_M = 5.0
+MAP_INITIAL_HALF_RANGE_M = MAP_HALF_SIZE_M
 
-MAP_EXPAND_MARGIN_M = 1.0
+# Persistent occupancy map is fixed-size and does not auto-expand.
+MAP_EXPAND_MARGIN_M = 0.0
 
 DISPLAY_UPDATE_TIME_S = 0.02
 
@@ -382,9 +420,55 @@ last_navx_delta = 0.0
 
 # ============================================================
 # OCCUPANCY GRID STORAGE
+#
+# rows = map Y
+# cols = map X
+#
+#  0 = unknown
+# <0 = free-space evidence
+# >0 = obstacle evidence
 # ============================================================
 
-occupancy_grid = {}
+occupancy_grid = np.zeros(
+    (
+        MAP_CELL_COUNT,
+        MAP_CELL_COUNT
+    ),
+    dtype=np.int16
+)
+
+
+# ============================================================
+# MAPPING POSE
+#
+# The persistent map uses the SAME localization pose produced here:
+#
+# LiDAR ICP X/Y + navX heading
+#
+# No encoder X/Y is used for the persistent map.
+#
+# Display convention matches keyboard tracking:
+#
+# 0 degrees   = +X = right
+# 90 degrees  = -Y = down
+# 180 degrees = -X = left
+# ============================================================
+
+map_pose_zero_initialized = False
+
+map_pose_zero_x = 0.0
+
+map_pose_zero_y = 0.0
+
+map_pose_zero_heading = 0.0
+
+mapping_robot_x = 0.0
+
+mapping_robot_y = 0.0
+
+mapping_robot_heading = 0.0
+
+mapping_pose_available = False
 
 
 # ============================================================
@@ -395,13 +479,13 @@ live_view_center_x = 0.0
 
 live_view_center_y = 0.0
 
-map_min_x = -MAP_INITIAL_HALF_RANGE_M
+map_min_x = -MAP_HALF_SIZE_M
 
-map_max_x = MAP_INITIAL_HALF_RANGE_M
+map_max_x = MAP_HALF_SIZE_M
 
-map_min_y = -MAP_INITIAL_HALF_RANGE_M
+map_min_y = -MAP_HALF_SIZE_M
 
-map_max_y = MAP_INITIAL_HALF_RANGE_M
+map_max_y = MAP_HALF_SIZE_M
 
 
 # ============================================================
@@ -492,7 +576,7 @@ def heading_rotation_matrix(
 # Expected Java NetworkTables:
 #
 # table:
-# RobotPose
+# navX RobotPose table
 #
 # key:
 # Heading
@@ -643,6 +727,257 @@ def pure_rotation_commanded():
         abs(command_y)
         <
         KEYBOARD_MOVE_THRESHOLD
+    )
+
+
+# ============================================================
+# MAPPING POSE FROM LIDAR LOCALIZATION + NAVX
+#
+# IMPORTANT:
+#
+# X/Y come from this file's LiDAR ICP localization:
+#     robot_x
+#     robot_y
+#
+# Heading comes from navX:
+#     robot_heading
+#
+# No encoder X/Y is used here.
+#
+# We only subtract the mapping origin. We do NOT rotate the
+# already-localized X/Y by the reset heading again.
+# ============================================================
+
+def read_mapping_pose():
+
+    global map_pose_zero_initialized
+    global map_pose_zero_x
+    global map_pose_zero_y
+    global map_pose_zero_heading
+
+    global mapping_robot_x
+    global mapping_robot_y
+    global mapping_robot_heading
+    global mapping_pose_available
+
+    # Mapping is trusted only while the LiDAR translation and navX
+    # heading are both valid.
+    if (
+        not localization_valid
+        or
+        not navx_available
+    ):
+
+        mapping_pose_available = False
+
+        return False
+
+    if not map_pose_zero_initialized:
+
+        map_pose_zero_x = float(
+            robot_x
+        )
+
+        map_pose_zero_y = float(
+            robot_y
+        )
+
+        map_pose_zero_heading = float(
+            robot_heading
+        )
+
+        map_pose_zero_initialized = True
+
+    # LiDAR localization is already in a world frame.
+    # Only remove the map origin.
+    delta_world_x = (
+        robot_x
+        -
+        map_pose_zero_x
+    )
+
+    delta_world_y = (
+        robot_y
+        -
+        map_pose_zero_y
+    )
+
+    # Fixed display/map axis conversion:
+    # localization +Y forward -> map +X/right
+    # localization +X right   -> map -Y/down
+    mapping_robot_x = float(
+        delta_world_y
+    )
+
+    mapping_robot_y = float(
+        -delta_world_x
+    )
+
+    mapping_robot_heading = normalize_heading(
+        robot_heading
+        -
+        map_pose_zero_heading
+    )
+
+    mapping_pose_available = True
+
+    return True
+
+
+def reset_mapping_pose_zero():
+
+    global map_pose_zero_initialized
+    global map_pose_zero_x
+    global map_pose_zero_y
+    global map_pose_zero_heading
+
+    global mapping_robot_x
+    global mapping_robot_y
+    global mapping_robot_heading
+    global mapping_pose_available
+
+    # reset_localization() has already reset the LiDAR translation
+    # and the Python navX reference. Use those exact values as the
+    # new fixed-map origin.
+    map_pose_zero_x = float(
+        robot_x
+    )
+
+    map_pose_zero_y = float(
+        robot_y
+    )
+
+    map_pose_zero_heading = float(
+        robot_heading
+    )
+
+    map_pose_zero_initialized = True
+
+    mapping_robot_x = 0.0
+
+    mapping_robot_y = 0.0
+
+    mapping_robot_heading = 0.0
+
+    mapping_pose_available = (
+        navx_available
+    )
+
+
+# ============================================================
+# LOCAL LIDAR POINT -> FIXED MAP COORDINATE
+# ============================================================
+
+def local_points_to_mapping_world(
+        local_points):
+
+    if len(local_points) == 0:
+
+        return np.empty(
+            (0, 2)
+        )
+
+    heading_rad = math.radians(
+        mapping_robot_heading
+    )
+
+    cos_h = math.cos(
+        heading_rad
+    )
+
+    sin_h = math.sin(
+        heading_rad
+    )
+
+    local_x = local_points[:, 0]
+
+    local_y = local_points[:, 1]
+
+    # Display/map convention:
+    # 0° = +X/right
+    # positive navX = clockwise
+    map_delta_x = (
+        -local_x
+        *
+        sin_h
+        +
+        local_y
+        *
+        cos_h
+    )
+
+    map_delta_y = (
+        -local_x
+        *
+        cos_h
+        -
+        local_y
+        *
+        sin_h
+    )
+
+    map_x = (
+        mapping_robot_x
+        +
+        map_delta_x
+    )
+
+    map_y = (
+        mapping_robot_y
+        +
+        map_delta_y
+    )
+
+    return np.column_stack(
+        (
+            map_x,
+            map_y
+        )
+    )
+
+
+# ============================================================
+# LOCALIZATION WORLD -> DISPLAY COORDINATES
+#
+# LiDAR localization internal frame:
+# +X = right at heading 0
+# +Y = forward at heading 0
+#
+# Display frame:
+# +X = forward at heading 0
+# +Y = left at heading 0
+#
+# This is a FIXED axis conversion only.
+# ============================================================
+
+def localization_world_points_to_display(
+        world_points):
+
+    if len(world_points) == 0:
+
+        return np.empty(
+            (0, 2)
+        )
+
+    display_x = world_points[:, 1]
+
+    display_y = -world_points[:, 0]
+
+    return np.column_stack(
+        (
+            display_x,
+            display_y
+        )
+    )
+
+
+def localization_world_pose_to_display(
+        world_x,
+        world_y):
+
+    return (
+        float(world_y),
+        float(-world_x)
     )
 
 
@@ -1308,10 +1643,6 @@ def track_localization(
     global robot_heading
     global robot_translation
 
-    # ========================================================
-    # FIX FOR YOUR UnboundLocalError
-    # ========================================================
-
     global previous_good_scan
     global previous_good_translation
     global previous_navx_heading
@@ -1414,34 +1745,95 @@ def track_localization(
 
 
     # ========================================================
-    # PURE Q/E ROTATION
+    # READ KEYBOARD COMMAND STATE
     #
-    # Heading changes from navX.
-    # X/Y stay fixed.
+    # IMPORTANT:
+    #
+    # We use the command ONLY as a motion-state hint.
+    # X/Y still come from LiDAR ICP.
+    #
+    # W+Q / W+E:
+    # translation_commanded = True
+    # rotation_commanded    = True
+    # -> ICP translation MUST still be accepted.
     # ========================================================
 
-    if pure_rotation_commanded():
+    keyboard_enabled = keyboard_table.getBoolean(
+        "Enabled",
+        False
+    )
+
+    command_x = keyboard_table.getNumber(
+        "X",
+        0.0
+    )
+
+    command_y = keyboard_table.getNumber(
+        "Y",
+        0.0
+    )
+
+    command_z = keyboard_table.getNumber(
+        "Z",
+        0.0
+    )
+
+    translation_commanded = (
+        keyboard_enabled
+        and
+        (
+            abs(command_x)
+            >=
+            KEYBOARD_MOVE_THRESHOLD
+            or
+            abs(command_y)
+            >=
+            KEYBOARD_MOVE_THRESHOLD
+        )
+    )
+
+    rotation_commanded = (
+        keyboard_enabled
+        and
+        abs(command_z)
+        >=
+        KEYBOARD_TURN_THRESHOLD
+    )
+
+
+    # ========================================================
+    # STATIONARY HOLD
+    #
+    # When keyboard mode is active but NO movement key is
+    # pressed, the physical robot is intentionally stationary.
+    #
+    # Do NOT let scan noise slowly move X/Y.
+    #
+    # We still refresh the reference scan so that when the
+    # next movement starts ICP compares against a fresh scan.
+    # ========================================================
+
+    if (
+        keyboard_enabled
+        and
+        not translation_commanded
+        and
+        not rotation_commanded
+    ):
 
         localization_valid = True
 
         localization_state = (
-            "NAVX_ROTATING"
+            "STATIONARY_HOLD"
         )
 
-        pose_locked = False
+        pose_locked = True
 
         last_relative_translation = (
             0.0
         )
 
-        rotation_hold_count += 1
-
         consecutive_hold_count = 0
-
-
-        # ====================================================
-        # KEEP SCAN REFERENCE UPDATED DURING ROTATION
-        # ====================================================
 
         previous_good_scan = (
             current_scan.copy()
@@ -1455,10 +1847,54 @@ def track_localization(
             robot_heading
         )
 
+        return
 
-        # ====================================================
-        # REFRESH KEYFRAME AFTER ENOUGH ROTATION
-        # ====================================================
+
+    # ========================================================
+    # PURE Q/E ROTATION
+    #
+    # No translation command -> hold X/Y.
+    # Heading still follows navX.
+    #
+    # IMPORTANT:
+    # This does NOT activate for W+Q, W+E, S+Q, S+E,
+    # A+Q, etc. Those contain translation and therefore
+    # continue through ICP below.
+    # ========================================================
+
+    if (
+        rotation_commanded
+        and
+        not translation_commanded
+    ):
+
+        localization_valid = True
+
+        localization_state = (
+            "NAVX_ROTATING"
+        )
+
+        pose_locked = True
+
+        last_relative_translation = (
+            0.0
+        )
+
+        rotation_hold_count += 1
+
+        consecutive_hold_count = 0
+
+        previous_good_scan = (
+            current_scan.copy()
+        )
+
+        previous_good_translation = (
+            robot_translation.copy()
+        )
+
+        previous_navx_heading = (
+            robot_heading
+        )
 
         if (
             abs(
@@ -1479,7 +1915,17 @@ def track_localization(
 
 
     # ========================================================
-    # NORMAL LIDAR TRANSLATION
+    # NORMAL / COMBINED MOTION LIDAR TRANSLATION
+    #
+    # This includes:
+    #
+    # W, S, A, D
+    # W+Q, W+E
+    # S+Q, S+E
+    # A/D + turn
+    #
+    # navX supplies the rotation between scans.
+    # ICP supplies translation.
     # ========================================================
 
     (
@@ -1529,44 +1975,19 @@ def track_localization(
             relative_distance
         )
 
-
-        # ====================================================
-        # BACKUP ROTATION SUPPRESSION
-        # ====================================================
-
-        if (
-            abs(navx_delta)
-            >=
-            ROTATION_SUPPRESSION_MIN_DEG
-            and
-            relative_distance
-            <=
-            ROTATION_SUPPRESSION_MAX_TRANSLATION_M
-        ):
-
-            relative_translation = np.array(
-                [
-                    0.0,
-                    0.0
-                ],
-                dtype=float
-            )
-
-            localization_state = (
-                "ROTATION_HOLD_XY"
-            )
-
-            rotation_hold_count += 1
-
-        else:
-
-            localization_state = (
-                "TRACKING"
-            )
-
+        localization_state = (
+            "TRACKING_TURN"
+            if rotation_commanded
+            else
+            "TRACKING"
+        )
 
         # ====================================================
         # TRANSLATION -> WORLD
+        #
+        # DO NOT suppress this translation just because navX
+        # is turning. That old suppression was the reason
+        # W+Q / W+E could fail to draw a route.
         # ====================================================
 
         world_delta = local_translation_to_world(
@@ -1574,9 +1995,11 @@ def track_localization(
             previous_navx_heading
         )
 
-
         # ====================================================
-        # REMOVE MICRO MOVEMENT
+        # MICRO-MOVEMENT FILTER
+        #
+        # Only used during actual translation tracking.
+        # Stationary drift is already handled above.
         # ====================================================
 
         if (
@@ -1601,7 +2024,6 @@ def track_localization(
 
             pose_locked = False
 
-
         robot_translation = (
             previous_good_translation
             +
@@ -1620,15 +2042,9 @@ def track_localization(
 
         consecutive_hold_count = 0
 
-
-        # ====================================================
-        # STORE CURRENT AS NEW REFERENCE
-        # ====================================================
-
         store_previous_good_scan(
             current_scan
         )
-
 
         if keyframe_needed():
 
@@ -1682,43 +2098,20 @@ def track_localization(
                 )
             )
 
-
-            # =================================================
-            # ROTATION RECOVERY
-            # =================================================
-
-            if (
-                abs(
-                    keyframe_heading_delta
-                )
-                >=
-                ROTATION_SUPPRESSION_MIN_DEG
-                and
+            last_relative_translation = (
                 recovery_distance
-                <=
-                ROTATION_SUPPRESSION_MAX_TRANSLATION_M
-            ):
+            )
 
-                recovery_translation = np.array(
-                    [
-                        0.0,
-                        0.0
-                    ],
-                    dtype=float
-                )
+            localization_state = (
+                "RECOVERED_TURN"
+                if rotation_commanded
+                else
+                "RECOVERED"
+            )
 
-                localization_state = (
-                    "NAVX_ROTATION_RECOVERED"
-                )
-
-                rotation_hold_count += 1
-
-            else:
-
-                localization_state = (
-                    "RECOVERED"
-                )
-
+            # ================================================
+            # KEEP TRANSLATION DURING COMBINED TURN + MOVE
+            # ================================================
 
             world_delta = local_translation_to_world(
                 recovery_translation,
@@ -1755,10 +2148,6 @@ def track_localization(
                 recovery_ratio
             )
 
-            last_relative_translation = (
-                recovery_distance
-            )
-
             store_previous_good_scan(
                 current_scan
             )
@@ -1772,10 +2161,6 @@ def track_localization(
 
     # ========================================================
     # HOLD
-    #
-    # X/Y stay at the last trusted position.
-    #
-    # Heading continues following navX.
     # ========================================================
 
     localization_valid = False
@@ -1934,104 +2319,367 @@ def clusters_to_points(
 
 
 # ============================================================
-# OCCUPANCY GRID
+# OCCUPANCY GRID HELPERS
 # ============================================================
 
-def update_occupancy_grid(
-        world_points):
+def map_xy_to_grid(
+        x,
+        y):
 
-    global occupancy_grid
+    column = int(
+        math.floor(
+            (
+                x
+                +
+                MAP_HALF_SIZE_M
+            )
+            /
+            GRID_SIZE_M
+        )
+    )
 
-    if len(world_points) == 0:
+    row = int(
+        math.floor(
+            (
+                y
+                +
+                MAP_HALF_SIZE_M
+            )
+            /
+            GRID_SIZE_M
+        )
+    )
+
+    return (
+        row,
+        column
+    )
+
+
+def grid_cell_inside(
+        row,
+        column):
+
+    return (
+        row >= 0
+        and
+        row < MAP_CELL_COUNT
+        and
+        column >= 0
+        and
+        column < MAP_CELL_COUNT
+    )
+
+
+def add_free_evidence(
+        row,
+        column):
+
+    if not grid_cell_inside(
+        row,
+        column
+    ):
 
         return
 
-    seen = set()
+    occupancy_grid[
+        row,
+        column
+    ] = max(
+        MIN_CELL_CONFIDENCE,
+        int(
+            occupancy_grid[
+                row,
+                column
+            ]
+        )
+        +
+        FREE_CELL_UPDATE
+    )
 
-    for point in world_points:
 
-        grid_x = int(
+def add_occupied_evidence(
+        row,
+        column):
+
+    if not grid_cell_inside(
+        row,
+        column
+    ):
+
+        return
+
+    occupancy_grid[
+        row,
+        column
+    ] = min(
+        MAX_CELL_CONFIDENCE,
+        int(
+            occupancy_grid[
+                row,
+                column
+            ]
+        )
+        +
+        OCCUPIED_CELL_UPDATE
+    )
+
+
+# ============================================================
+# UPDATE ONE LIDAR RAY
+#
+# Robot -> endpoint:
+#
+# cells before endpoint = FREE
+# endpoint = OCCUPIED
+# ============================================================
+
+def update_one_occupancy_ray(
+        robot_map_x,
+        robot_map_y,
+        endpoint_x,
+        endpoint_y):
+
+    start_row, start_column = map_xy_to_grid(
+        robot_map_x,
+        robot_map_y
+    )
+
+    end_row, end_column = map_xy_to_grid(
+        endpoint_x,
+        endpoint_y
+    )
+
+    delta_column = (
+        end_column
+        -
+        start_column
+    )
+
+    delta_row = (
+        end_row
+        -
+        start_row
+    )
+
+    steps = int(
+        max(
+            abs(
+                delta_column
+            ),
+            abs(
+                delta_row
+            )
+        )
+    )
+
+    if steps <= 0:
+
+        if grid_cell_inside(
+            end_row,
+            end_column
+        ):
+
+            add_occupied_evidence(
+                end_row,
+                end_column
+            )
+
+        return
+
+    # Free-space ray. Do not include the final endpoint cell.
+    for step in range(
+        0,
+        steps
+    ):
+
+        fraction = (
+            float(step)
+            /
+            float(steps)
+        )
+
+        column = int(
             round(
-                point[0]
-                /
-                GRID_SIZE_M
+                start_column
+                +
+                delta_column
+                *
+                fraction
             )
         )
 
-        grid_y = int(
+        row = int(
             round(
-                point[1]
-                /
-                GRID_SIZE_M
+                start_row
+                +
+                delta_row
+                *
+                fraction
             )
         )
 
-        key = (
-            grid_x,
-            grid_y
+        add_free_evidence(
+            row,
+            column
         )
 
-        if key in seen:
+    # Only mark an obstacle if its measured endpoint is actually
+    # inside the fixed map. A ray whose endpoint is outside the
+    # 7 m map still clears free cells that pass through the map.
+    if grid_cell_inside(
+        end_row,
+        end_column
+    ):
 
-            continue
-
-        seen.add(
-            key
+        add_occupied_evidence(
+            end_row,
+            end_column
         )
 
-        confidence = occupancy_grid.get(
-            key,
-            0
+
+# ============================================================
+# OCCUPANCY GRID UPDATE
+# ============================================================
+
+def update_occupancy_grid(
+        local_points):
+
+    if (
+        not mapping_pose_available
+        or
+        len(local_points) == 0
+    ):
+
+        return
+
+    map_points = local_points_to_mapping_world(
+        local_points
+    )
+
+    for index in range(
+        0,
+        len(map_points),
+        MAP_RAY_STRIDE
+    ):
+
+        endpoint = map_points[
+            index
+        ]
+
+        update_one_occupancy_ray(
+            mapping_robot_x,
+            mapping_robot_y,
+            float(
+                endpoint[0]
+            ),
+            float(
+                endpoint[1]
+            )
         )
-
-        confidence += 1
-
-        confidence = min(
-            confidence,
-            MAX_CELL_CONFIDENCE
-        )
-
-        occupancy_grid[
-            key
-        ] = confidence
 
 
 def get_confirmed_map_points():
 
-    points = []
+    rows, columns = np.where(
+        occupancy_grid
+        >=
+        OCCUPIED_CONFIRM_THRESHOLD
+    )
 
-    for (
-        key,
-        confidence
-    ) in occupancy_grid.items():
-
-        if (
-            confidence
-            >=
-            OCCUPIED_CONFIRM_THRESHOLD
-        ):
-
-            points.append(
-                [
-                    key[0]
-                    *
-                    GRID_SIZE_M,
-
-                    key[1]
-                    *
-                    GRID_SIZE_M
-                ]
-            )
-
-    if len(points) == 0:
+    if len(rows) == 0:
 
         return np.empty(
             (0, 2)
         )
 
-    return np.array(
-        points,
+    x_values = (
+        (
+            columns.astype(float)
+            +
+            0.5
+        )
+        *
+        GRID_SIZE_M
+        -
+        MAP_HALF_SIZE_M
+    )
+
+    y_values = (
+        (
+            rows.astype(float)
+            +
+            0.5
+        )
+        *
+        GRID_SIZE_M
+        -
+        MAP_HALF_SIZE_M
+    )
+
+    return np.column_stack(
+        (
+            x_values,
+            y_values
+        )
+    )
+
+
+def get_occupancy_display_image():
+
+    image = np.full(
+        occupancy_grid.shape,
+        0.55,
         dtype=float
+    )
+
+    free_mask = (
+        occupancy_grid
+        <=
+        FREE_CELL_THRESHOLD
+    )
+
+    occupied_mask = (
+        occupancy_grid
+        >=
+        OCCUPIED_CONFIRM_THRESHOLD
+    )
+
+    image[
+        free_mask
+    ] = 1.0
+
+    image[
+        occupied_mask
+    ] = 0.0
+
+    return image
+
+
+def get_map_coverage_percent():
+
+    known_cells = int(
+        np.count_nonzero(
+            occupancy_grid
+            !=
+            0
+        )
+    )
+
+    total_cells = int(
+        occupancy_grid.size
+    )
+
+    if total_cells <= 0:
+
+        return 0.0
+
+    return (
+        100.0
+        *
+        known_cells
+        /
+        total_cells
     )
 
 
@@ -2285,21 +2933,13 @@ def save_map():
 
     points = get_confirmed_map_points()
 
-    if len(points) == 0:
-
-        print(
-            "No confirmed map points."
-        )
-
-        return
-
     timestamp = time.strftime(
         "%Y%m%d_%H%M%S"
     )
 
     csv_path = os.path.join(
         MAP_SAVE_FOLDER,
-        "lidar_map_"
+        "lidar_occupancy_map_"
         +
         timestamp
         +
@@ -2308,11 +2948,20 @@ def save_map():
 
     png_path = os.path.join(
         MAP_SAVE_FOLDER,
-        "lidar_map_"
+        "lidar_occupancy_map_"
         +
         timestamp
         +
         ".png"
+    )
+
+    npy_path = os.path.join(
+        MAP_SAVE_FOLDER,
+        "lidar_occupancy_grid_"
+        +
+        timestamp
+        +
+        ".npy"
     )
 
     with open(
@@ -2341,44 +2990,95 @@ def save_map():
                 ]
             )
 
+    np.save(
+        npy_path,
+        occupancy_grid
+    )
+
     save_fig, save_axis = plt.subplots(
         figsize=(9, 9)
     )
 
-    save_axis.scatter(
-        points[:, 0],
-        points[:, 1],
-        s=SAVED_MAP_POINT_SIZE,
-        c="black",
-        marker="s"
+    save_axis.imshow(
+        get_occupancy_display_image(),
+        origin="lower",
+        extent=[
+            -MAP_HALF_SIZE_M,
+            MAP_HALF_SIZE_M,
+            -MAP_HALF_SIZE_M,
+            MAP_HALF_SIZE_M
+        ],
+        cmap="gray",
+        vmin=0.0,
+        vmax=1.0,
+        interpolation="nearest"
     )
 
+    # Logged positions are stored in the LiDAR-localization
+    # coordinate convention (+Y forward). Convert them to the
+    # same display convention used by the occupancy map.
     for position in logged_positions:
 
+        display_x = position["y"]
+
+        display_y = -position["x"]
+
         save_axis.scatter(
-            position["x"],
-            position["y"],
+            display_x,
+            display_y,
             s=60,
             marker="o"
         )
 
         save_axis.text(
-            position["x"],
-            position["y"] + 0.12,
+            display_x,
+            display_y + 0.12,
             (
                 f'{position["name"]}\n'
-                f'{position["x"]:.2f}, '
-                f'{position["y"]:.2f}\n'
+                f'{display_x:.2f}, '
+                f'{display_y:.2f}\n'
                 f'{position["heading"]:.1f}°'
             ),
             ha="center"
         )
 
     save_axis.scatter(
-        robot_x,
-        robot_y,
+        mapping_robot_x,
+        mapping_robot_y,
         s=100,
-        marker="^"
+        marker="o"
+    )
+
+    heading_rad = math.radians(
+        mapping_robot_heading
+    )
+
+    save_axis.arrow(
+        mapping_robot_x,
+        mapping_robot_y,
+        0.35
+        *
+        math.cos(
+            heading_rad
+        ),
+        -0.35
+        *
+        math.sin(
+            heading_rad
+        ),
+        width=0.01,
+        head_width=0.10,
+        length_includes_head=True
+    )
+
+    save_axis.set_xlim(
+        -MAP_HALF_SIZE_M,
+        MAP_HALF_SIZE_M
+    )
+
+    save_axis.set_ylim(
+        -MAP_HALF_SIZE_M,
+        MAP_HALF_SIZE_M
     )
 
     save_axis.set_aspect(
@@ -2387,15 +3087,15 @@ def save_map():
     )
 
     save_axis.set_xlabel(
-        "World X (m)"
+        "Map X (m)"
     )
 
     save_axis.set_ylabel(
-        "World Y (m)"
+        "Map Y (m)"
     )
 
     save_axis.set_title(
-        "LiDAR + navX Localization Map"
+        f"LiDAR Occupancy Map - {MAP_SIZE_M:.1f} m x {MAP_SIZE_M:.1f} m"
     )
 
     save_fig.savefig(
@@ -2409,7 +3109,7 @@ def save_map():
     )
 
     print(
-        "MAP SAVED"
+        "OCCUPANCY MAP SAVED"
     )
 
     print(
@@ -2418,6 +3118,10 @@ def save_map():
 
     print(
         png_path
+    )
+
+    print(
+        npy_path
     )
 
 
@@ -2465,6 +3169,16 @@ def reset_localization():
     global last_navx_delta
 
     global occupancy_grid
+
+    global map_pose_zero_initialized
+    global map_pose_zero_x
+    global map_pose_zero_y
+    global map_pose_zero_heading
+
+    global mapping_robot_x
+    global mapping_robot_y
+    global mapping_robot_heading
+    global mapping_pose_available
 
 
     # ========================================================
@@ -2557,7 +3271,11 @@ def reset_localization():
 
     last_navx_delta = 0.0
 
-    occupancy_grid = {}
+    occupancy_grid.fill(
+        0
+    )
+
+    reset_mapping_pose_zero()
 
 
     print(
@@ -2693,11 +3411,11 @@ ax_live.set_title(
 )
 
 ax_live.set_xlabel(
-    "World X (m)"
+    "Display X (m)"
 )
 
 ax_live.set_ylabel(
-    "World Y (m)"
+    "Display Y (m)"
 )
 
 ax_live.set_aspect(
@@ -2740,18 +3458,24 @@ live_heading_line, = ax_live.plot(
 
 # ============================================================
 # MAP PLOT
+#
+# Fixed 7 m x 7 m occupancy grid:
+#
+# black = occupied
+# white = free
+# grey  = unknown
 # ============================================================
 
 ax_map.set_title(
-    "PERSISTENT - Confirmed Map"
+    f"OCCUPANCY MAP - {MAP_SIZE_M:.1f} m x {MAP_SIZE_M:.1f} m"
 )
 
 ax_map.set_xlabel(
-    "World X (m)"
+    "Map X (m)"
 )
 
 ax_map.set_ylabel(
-    "World Y (m)"
+    "Map Y (m)"
 )
 
 ax_map.set_aspect(
@@ -2760,29 +3484,36 @@ ax_map.set_aspect(
 )
 
 ax_map.set_xlim(
-    map_min_x,
-    map_max_x
+    -MAP_HALF_SIZE_M,
+    MAP_HALF_SIZE_M
 )
 
 ax_map.set_ylim(
-    map_min_y,
-    map_max_y
+    -MAP_HALF_SIZE_M,
+    MAP_HALF_SIZE_M
 )
 
-map_scatter = ax_map.scatter(
-    [],
-    [],
-    s=MAP_POINT_SIZE,
-    c="black",
-    marker="s"
+map_image = ax_map.imshow(
+    get_occupancy_display_image(),
+    origin="lower",
+    extent=[
+        -MAP_HALF_SIZE_M,
+        MAP_HALF_SIZE_M,
+        -MAP_HALF_SIZE_M,
+        MAP_HALF_SIZE_M
+    ],
+    cmap="gray",
+    vmin=0.0,
+    vmax=1.0,
+    interpolation="nearest"
 )
 
 map_robot, = ax_map.plot(
     [],
     [],
-    marker="^",
+    marker="o",
     linestyle="None",
-    markersize=10
+    markersize=8
 )
 
 map_heading_line, = ax_map.plot(
@@ -2879,6 +3610,8 @@ time.sleep(
 
 reset_python_navx_zero()
 
+reset_mapping_pose_zero()
+
 
 # ============================================================
 # MAIN LOOP
@@ -2952,13 +3685,24 @@ try:
 
 
         # ====================================================
-        # MAP UPDATE
+        # FIXED OCCUPANCY MAP UPDATE
+        #
+        # Pose source:
+        # LiDAR ICP = X/Y translation
+        # navX      = heading
+        #
+        # No encoder X/Y is used for this map.
+        #
+        # Sensor source:
+        # current filtered LiDAR points.
         # ====================================================
+
+        read_mapping_pose()
 
         frame_counter += 1
 
         if (
-            localization_valid
+            mapping_pose_available
             and
             frame_counter
             %
@@ -2968,7 +3712,7 @@ try:
         ):
 
             update_occupancy_grid(
-                filtered_world_points
+                filtered_local_points
             )
 
         confirmed_points = (
@@ -3004,8 +3748,28 @@ try:
 
 
         # ====================================================
-        # HEADING ARROW
+        # LIVE DISPLAY COORDINATES
+        #
+        # Use the exact same fixed display convention as the
+        # occupancy map and keyboard route:
+        #
+        # 0° = +X/right
+        # positive navX = clockwise
         # ====================================================
+
+        live_display_points = (
+            localization_world_points_to_display(
+                filtered_world_points
+            )
+        )
+
+        (
+            live_display_robot_x,
+            live_display_robot_y
+        ) = localization_world_pose_to_display(
+            robot_x,
+            robot_y
+        )
 
         heading_rad = math.radians(
             robot_heading
@@ -3014,15 +3778,15 @@ try:
         heading_dx = (
             0.40
             *
-            math.sin(
+            math.cos(
                 heading_rad
             )
         )
 
         heading_dy = (
-            0.40
+            -0.40
             *
-            math.cos(
+            math.sin(
                 heading_rad
             )
         )
@@ -3033,11 +3797,11 @@ try:
         # ====================================================
 
         if len(
-            filtered_world_points
+            live_display_points
         ) > 0:
 
             live_scatter.set_offsets(
-                filtered_world_points
+                live_display_points
             )
 
         else:
@@ -3054,18 +3818,18 @@ try:
         # ====================================================
 
         live_robot.set_data(
-            [robot_x],
-            [robot_y]
+            [live_display_robot_x],
+            [live_display_robot_y]
         )
 
         live_heading_line.set_data(
             [
-                robot_x,
-                robot_x + heading_dx
+                live_display_robot_x,
+                live_display_robot_x + heading_dx
             ],
             [
-                robot_y,
-                robot_y + heading_dy
+                live_display_robot_y,
+                live_display_robot_y + heading_dy
             ]
         )
 
@@ -3076,7 +3840,7 @@ try:
 
         if (
             abs(
-                robot_x
+                live_display_robot_x
                 -
                 live_view_center_x
             )
@@ -3085,7 +3849,7 @@ try:
         ):
 
             live_view_center_x = (
-                robot_x
+                live_display_robot_x
             )
 
             ax_live.set_xlim(
@@ -3101,7 +3865,7 @@ try:
 
         if (
             abs(
-                robot_y
+                live_display_robot_y
                 -
                 live_view_center_y
             )
@@ -3110,7 +3874,7 @@ try:
         ):
 
             live_view_center_y = (
-                robot_y
+                live_display_robot_y
             )
 
             ax_live.set_ylim(
@@ -3125,59 +3889,74 @@ try:
 
 
         # ====================================================
-        # MAP POINTS
+        # OCCUPANCY MAP IMAGE
         # ====================================================
 
-        if len(
-            confirmed_points
-        ) > 0:
-
-            map_scatter.set_offsets(
-                confirmed_points
-            )
-
-        else:
-
-            map_scatter.set_offsets(
-                np.empty(
-                    (0, 2)
-                )
-            )
+        map_image.set_data(
+            get_occupancy_display_image()
+        )
 
 
         # ====================================================
         # MAP ROBOT
+        #
+        # 0° = +X/right
+        # positive navX = clockwise
         # ====================================================
 
+        map_heading_rad = math.radians(
+            mapping_robot_heading
+        )
+
+        map_heading_dx = (
+            0.40
+            *
+            math.cos(
+                map_heading_rad
+            )
+        )
+
+        map_heading_dy = (
+            -0.40
+            *
+            math.sin(
+                map_heading_rad
+            )
+        )
+
         map_robot.set_data(
-            [robot_x],
-            [robot_y]
+            [mapping_robot_x],
+            [mapping_robot_y]
         )
 
         map_heading_line.set_data(
             [
-                robot_x,
-                robot_x + heading_dx
+                mapping_robot_x,
+                mapping_robot_x
+                +
+                map_heading_dx
             ],
             [
-                robot_y,
-                robot_y + heading_dy
+                mapping_robot_y,
+                mapping_robot_y
+                +
+                map_heading_dy
             ]
         )
 
         map_robot_label.set_position(
             (
-                robot_x,
-                robot_y - 0.20
+                mapping_robot_x,
+                mapping_robot_y - 0.20
             )
         )
 
         map_robot_label.set_text(
             (
                 "ROBOT\n"
-                f"X {robot_x:.2f}\n"
-                f"Y {robot_y:.2f}\n"
-                f"{robot_heading:.1f}°"
+                f"X {mapping_robot_x:.2f}\n"
+                f"Y {mapping_robot_y:.2f}\n"
+                f"{mapping_robot_heading:.1f}°"
             )
         )
 
@@ -3242,6 +4021,11 @@ try:
                 f"HOLD frames: {consecutive_hold_count:<15} "
                 f"Distance scale: {DISTANCE_SCALE_FACTOR:.2f}\n"
 
+                f"Map pose: X={mapping_robot_x:6.2f} "
+                f"Y={mapping_robot_y:6.2f} "
+                f"H={mapping_robot_heading:6.1f}°     "
+                f"Coverage: {get_map_coverage_percent():5.1f}%\n"
+
                 "\n"
 
                 "Controls:   "
@@ -3253,132 +4037,11 @@ try:
 
 
         # ====================================================
-        # MAP AUTO-EXPAND
+        # FIXED MAP SIZE
+        #
+        # The occupancy map remains centred on the mapping
+        # reset origin from -3.5 m to +3.5 m on each axis.
         # ====================================================
-
-        if len(
-            confirmed_points
-        ) > 0:
-
-            required_min_x = min(
-                float(
-                    np.min(
-                        confirmed_points[:, 0]
-                    )
-                ),
-                robot_x
-            )
-
-            required_max_x = max(
-                float(
-                    np.max(
-                        confirmed_points[:, 0]
-                    )
-                ),
-                robot_x
-            )
-
-            required_min_y = min(
-                float(
-                    np.min(
-                        confirmed_points[:, 1]
-                    )
-                ),
-                robot_y
-            )
-
-            required_max_y = max(
-                float(
-                    np.max(
-                        confirmed_points[:, 1]
-                    )
-                ),
-                robot_y
-            )
-
-            changed = False
-
-
-            if (
-                required_min_x
-                <
-                map_min_x
-                +
-                MAP_EXPAND_MARGIN_M
-            ):
-
-                map_min_x = (
-                    required_min_x
-                    -
-                    MAP_EXPAND_MARGIN_M
-                )
-
-                changed = True
-
-
-            if (
-                required_max_x
-                >
-                map_max_x
-                -
-                MAP_EXPAND_MARGIN_M
-            ):
-
-                map_max_x = (
-                    required_max_x
-                    +
-                    MAP_EXPAND_MARGIN_M
-                )
-
-                changed = True
-
-
-            if (
-                required_min_y
-                <
-                map_min_y
-                +
-                MAP_EXPAND_MARGIN_M
-            ):
-
-                map_min_y = (
-                    required_min_y
-                    -
-                    MAP_EXPAND_MARGIN_M
-                )
-
-                changed = True
-
-
-            if (
-                required_max_y
-                >
-                map_max_y
-                -
-                MAP_EXPAND_MARGIN_M
-            ):
-
-                map_max_y = (
-                    required_max_y
-                    +
-                    MAP_EXPAND_MARGIN_M
-                )
-
-                changed = True
-
-
-            if changed:
-
-                ax_map.set_xlim(
-                    map_min_x,
-                    map_max_x
-                )
-
-                ax_map.set_ylim(
-                    map_min_y,
-                    map_max_y
-                )
-
 
         # ====================================================
         # DRAW
