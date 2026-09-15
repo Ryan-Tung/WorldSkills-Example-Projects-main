@@ -17,6 +17,9 @@ import frc.robot.commands.DriveUntilBlack;
 import frc.robot.commands.LocalizationMonitor;
 import frc.robot.commands.KeyboardDrive;
 import frc.robot.commands.EncoderLocalizationTest;
+import frc.robot.commands.FusionLocalizationCommand;
+
+import frc.robot.subsystems.FusionLocalization;
 
 
 public class Robot extends TimedRobot
@@ -26,6 +29,16 @@ public class Robot extends TimedRobot
     // =====================================================
 
     private CommandBase selectedCommand;
+
+
+    // =====================================================
+    // FUSION LOCALIZATION
+    //
+    // Separate subsystem so existing DriveTrain,
+    // LiDAR, Cobra and keyboard code are not modified.
+    // =====================================================
+
+    private FusionLocalization fusionLocalization;
 
 
     // =====================================================
@@ -40,6 +53,18 @@ public class Robot extends TimedRobot
         // =================================================
 
         new RobotContainer();
+
+
+        // =================================================
+        // CREATE FUSION SUBSYSTEM
+        //
+        // Uses existing DriveTrain encoder odometry.
+        // =================================================
+
+        fusionLocalization =
+                new FusionLocalization(
+                        RobotContainer.driveTrain
+                );
 
 
         // =================================================
@@ -95,26 +120,40 @@ public class Robot extends TimedRobot
         // =================================================
         // ENCODER LOCALIZATION MODE
         //
-        // KeyboardDrive:
-        //     Moves the robot using Python W/A/S/D/Q/E
-        //
-        // EncoderLocalizationTest:
-        //     Reads encoder X/Y + navX heading
-        //
-        // Both run together.
-        //
-        // IMPORTANT:
-        // EncoderLocalizationTest must NOT use
-        // addRequirements(driveTrain).
+        // Existing mode remains untouched.
         // =================================================
 
         addAutoMode(
                 RobotContainer.autoChooser,
                 "ENCODER_LOCALIZATION",
+                new EncoderLocalizationTest(
+                        RobotContainer.driveTrain
+                )
+        );
+
+
+        // =================================================
+        // FUSION LOCALIZATION MODE
+        //
+        // KeyboardDrive:
+        //     controls robot motors
+        //
+        // FusionLocalizationCommand:
+        //     encoder odometry = prediction
+        //     LiDAR ICP       = correction
+        //     navX            = heading
+        //
+        // Both run together.
+        // =================================================
+
+        addAutoMode(
+                RobotContainer.autoChooser,
+                "FUSION_LOCALIZATION",
                 new ParallelCommandGroup(
                         new KeyboardDrive(),
-                        new EncoderLocalizationTest(
-                                RobotContainer.driveTrain
+
+                        new FusionLocalizationCommand(
+                                fusionLocalization
                         )
                 )
         );
