@@ -10,11 +10,13 @@ import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 
 import edu.wpi.first.wpilibj2.command.CommandBase;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
+import edu.wpi.first.wpilibj2.command.ParallelCommandGroup;
 
 import frc.robot.commands.NavigateOneMeter;
 import frc.robot.commands.DriveUntilBlack;
 import frc.robot.commands.LocalizationMonitor;
 import frc.robot.commands.KeyboardDrive;
+import frc.robot.commands.EncoderLocalizationTest;
 
 
 public class Robot extends TimedRobot
@@ -87,6 +89,34 @@ public class Robot extends TimedRobot
                 RobotContainer.autoChooser,
                 "KEYBOARD_DRIVE",
                 new KeyboardDrive()
+        );
+
+
+        // =================================================
+        // ENCODER LOCALIZATION MODE
+        //
+        // KeyboardDrive:
+        //     Moves the robot using Python W/A/S/D/Q/E
+        //
+        // EncoderLocalizationTest:
+        //     Reads encoder X/Y + navX heading
+        //
+        // Both run together.
+        //
+        // IMPORTANT:
+        // EncoderLocalizationTest must NOT use
+        // addRequirements(driveTrain).
+        // =================================================
+
+        addAutoMode(
+                RobotContainer.autoChooser,
+                "ENCODER_LOCALIZATION",
+                new ParallelCommandGroup(
+                        new KeyboardDrive(),
+                        new EncoderLocalizationTest(
+                                RobotContainer.driveTrain
+                        )
+                )
         );
 
 
@@ -328,8 +358,8 @@ public class Robot extends TimedRobot
         /*
          * CommandScheduler runs in robotPeriodic().
          *
-         * KEYBOARD_DRIVE will therefore continuously run
-         * KeyboardDrive.execute().
+         * Selected mode will therefore continuously
+         * execute while Teleop is enabled.
          */
     }
 
