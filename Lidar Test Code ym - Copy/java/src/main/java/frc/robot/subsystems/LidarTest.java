@@ -21,6 +21,24 @@ public class LidarTest extends SubsystemBase
 
 
     // =====================================================
+    // LIDAR MOUNTING ANGLE
+    //
+    // Same physical correction used by the Python mapping:
+    //
+    // corrected robot angle = raw LiDAR angle - 20°
+    //
+    // IMPORTANT:
+    // This correction is used ONLY for Java obstacle-sector
+    // checks. ScanA / ScanB are still published with RAW
+    // angles because Python already applies its own -20°
+    // correction.
+    // =====================================================
+
+    private static final double LIDAR_MOUNT_OFFSET_DEG =
+            -20.0;
+
+
+    // =====================================================
     // NETWORKTABLES
     // =====================================================
 
@@ -145,6 +163,27 @@ public class LidarTest extends SubsystemBase
 
 
             // =================================================
+            // CONVERT RAW LIDAR ANGLE TO ROBOT ANGLE
+            //
+            // Do this only for obstacle-sector checks.
+            // The published ScanA / ScanB values remain raw.
+            // =================================================
+
+            angle +=
+                    LIDAR_MOUNT_OFFSET_DEG;
+
+
+            angle =
+                    angle % 360.0;
+
+
+            if (angle < 0.0)
+            {
+                angle += 360.0;
+            }
+
+
+            // =================================================
             // CHECK ANGLE RANGE
             // =================================================
 
@@ -215,8 +254,8 @@ public class LidarTest extends SubsystemBase
     public double getFrontDistance()
     {
         return getClosestDistance(
-                300,
-                60
+                350,
+                10
         );
     }
 

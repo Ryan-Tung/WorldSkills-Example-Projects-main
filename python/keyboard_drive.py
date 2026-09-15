@@ -9,6 +9,7 @@ import numpy as np
 
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.patches import FancyArrowPatch
 
 from networktables import NetworkTables
 
@@ -36,6 +37,11 @@ keyboard_table = NetworkTables.getTable(
 
 localization_table = NetworkTables.getTable(
     "LidarLocalization"
+)
+
+
+robot_pose_table = NetworkTables.getTable(
+    "RobotPose"
 )
 
 
@@ -151,6 +157,36 @@ current_robot_y = 0.0
 current_robot_heading = 0.0
 
 current_localization_valid = False
+
+
+# ============================================================
+# ROBOTPOSE ROUTE TRACKING
+#
+# DriveTrain.java publishes encoder-based X/Y + navX heading.
+#
+# We use this for the keyboard route so:
+#
+# - forward movement is always visible
+# - crab left/right is always visible
+# - 0 degrees is displayed along +X (to the right)
+#
+# The zero reference is captured when this Python program
+# first receives a valid RobotPose.
+# ============================================================
+
+route_pose_zero_initialized = False
+
+route_pose_zero_x = 0.0
+
+route_pose_zero_y = 0.0
+
+route_pose_zero_heading = 0.0
+
+raw_robot_pose_x = 0.0
+
+raw_robot_pose_y = 0.0
+
+raw_robot_pose_heading = 0.0
 
 
 # ============================================================
@@ -531,6 +567,22 @@ def update_drive():
 # READ LIDAR LOCALIZATION
 # ============================================================
 
+def normalize_heading(
+        angle_deg):
+
+    while angle_deg > 180.0:
+
+        angle_deg -= 360.0
+
+
+    while angle_deg < -180.0:
+
+        angle_deg += 360.0
+
+
+    return angle_deg
+
+
 def read_localization():
 
     global current_robot_x
@@ -541,8 +593,242 @@ def read_localization():
 
     global current_localization_valid
 
+    global route_pose_zero_initialized
 
-    current_robot_x = (
+    global route_pose_zero_x
+
+    global route_pose_zero_y
+
+    global route_pose_zero_heading
+
+    global raw_robot_pose_x
+
+    global raw_robot_pose_y
+
+    global raw_robot_pose_heading
+
+
+    # ========================================================
+    # KEEP LIDAR LOCALIZATION STATUS
+    # ========================================================
+
+    current_localization_valid = (
+        localization_table
+        .getBoolean(
+            "LocalizationValid",
+            False
+        )
+    )
+
+
+    # ========================================================
+    # READ DRIVE TRAIN ENCODER / NAVX POSE
+    #
+    # RobotPose is published directly by DriveTrain.java.
+    #
+    # This is used for the keyboard route because the
+    # drivetrain encoders directly measure crab movement.
+    # ========================================================
+
+    raw_x = robot_pose_table.getNumber(
+        "X",
+        9999.0
+    )
+
+
+    raw_y = robot_pose_table.getNumber(
+        "Y",
+        9999.0
+    )
+
+
+    raw_heading = robot_pose_table.getNumber(
+        "Heading",
+        9999.0
+    )
+
+
+    robot_pose_available = (
+        raw_x != 9999.0
+        and
+        raw_y != 9999.0
+        and
+        raw_heading != 9999.0
+    )
+
+
+    # ========================================================
+    # ROBOTPOSE AVAILABLE
+    # ========================================================
+
+    if robot_pose_available:
+
+        raw_robot_pose_x = float(
+            raw_x
+        )
+
+
+        raw_robot_pose_y = float(
+            raw_y
+        )
+
+
+        raw_robot_pose_heading = float(
+            raw_heading
+        )
+
+
+        # ====================================================
+        # FIRST VALID POSE = ROUTE ORIGIN
+        #
+        # X = 0
+        # Y = 0
+        # Heading = 0
+        # ====================================================
+
+        if not route_pose_zero_initialized:
+
+            route_pose_zero_x = (
+                raw_robot_pose_x
+            )
+
+
+            route_pose_zero_y = (
+                raw_robot_pose_y
+            )
+
+
+            route_pose_zero_heading = (
+                raw_robot_pose_heading
+            )
+
+
+            route_pose_zero_initialized = (
+                True
+            )
+
+
+        # ====================================================
+        # POSITION CHANGE FROM START
+        # ====================================================
+
+        delta_world_x = (
+            raw_robot_pose_x
+            -
+            route_pose_zero_x
+        )
+
+
+        delta_world_y = (
+            raw_robot_pose_y
+            -
+            route_pose_zero_y
+        )
+
+
+        # ====================================================
+        # ROTATE POSITION INTO THE STARTING ROBOT FRAME
+        #
+        # Internal robot frame:
+        #
+        # +X = crab right
+        # +Y = forward
+        #
+        # This removes whatever absolute navX direction the
+        # robot had before keyboard driving started.
+        # ====================================================
+
+        zero_heading_rad = math.radians(
+            route_pose_zero_heading
+        )
+
+
+        cos_zero = math.cos(
+            zero_heading_rad
+        )
+
+
+        sin_zero = math.sin(
+            zero_heading_rad
+        )
+
+
+        relative_robot_x = (
+            delta_world_x
+            *
+            cos_zero
+            -
+            delta_world_y
+            *
+            sin_zero
+        )
+
+
+        relative_robot_y = (
+            delta_world_x
+            *
+            sin_zero
+            +
+            delta_world_y
+            *
+            cos_zero
+        )
+
+
+        # ====================================================
+        # DISPLAY COORDINATE CONVENTION
+        #
+        # User requested:
+        #
+        #                  270°
+        #                    ↑
+        #                    |
+        # 180°  <------------+------------> 0°
+        #                    |
+        #                    ↓
+        #                   90°
+        #
+        # Therefore:
+        #
+        # forward at 0°  -> +Display X
+        # crab right     -> -Display Y
+        # crab left      -> +Display Y
+        #
+        # This changes ONLY the keyboard graph coordinates.
+        # It does not change robot movement.
+        # ====================================================
+
+        current_robot_x = (
+            relative_robot_y
+        )
+
+
+        current_robot_y = (
+            -relative_robot_x
+        )
+
+
+        current_robot_heading = (
+            normalize_heading(
+                raw_robot_pose_heading
+                -
+                route_pose_zero_heading
+            )
+        )
+
+
+        return
+
+
+    # ========================================================
+    # FALLBACK
+    #
+    # If RobotPose is unavailable, use the Python LiDAR
+    # localization values and rotate them into the same
+    # display convention.
+    # ========================================================
+
+    fallback_x = (
         localization_table
         .getNumber(
             "RobotX",
@@ -551,7 +837,7 @@ def read_localization():
     )
 
 
-    current_robot_y = (
+    fallback_y = (
         localization_table
         .getNumber(
             "RobotY",
@@ -560,7 +846,7 @@ def read_localization():
     )
 
 
-    current_robot_heading = (
+    fallback_heading = (
         localization_table
         .getNumber(
             "RobotHeading",
@@ -569,12 +855,18 @@ def read_localization():
     )
 
 
-    current_localization_valid = (
-        localization_table
-        .getBoolean(
-            "LocalizationValid",
-            False
-        )
+    current_robot_x = (
+        fallback_y
+    )
+
+
+    current_robot_y = (
+        -fallback_x
+    )
+
+
+    current_robot_heading = (
+        fallback_heading
     )
 
 
@@ -850,11 +1142,16 @@ def update_route_display():
 
 
     # ========================================================
-    # HEADING
+    # HEADING ARROW
     #
-    # Same convention as LiDAR localization:
+    # Display convention:
     #
-    # 0° = +Y
+    # 0°   = +X = RIGHT
+    # 90°  = -Y = DOWN
+    # 180° = -X = LEFT
+    # 270° = +Y = UP
+    #
+    # navX positive direction is clockwise.
     # ========================================================
 
     heading_rad = math.radians(
@@ -865,34 +1162,34 @@ def update_route_display():
     heading_dx = (
         HEADING_ARROW_LENGTH_M
         *
-        math.sin(
-            heading_rad
-        )
-    )
-
-
-    heading_dy = (
-        HEADING_ARROW_LENGTH_M
-        *
         math.cos(
             heading_rad
         )
     )
 
 
-    heading_line.set_data(
-        [
+    heading_dy = (
+        -HEADING_ARROW_LENGTH_M
+        *
+        math.sin(
+            heading_rad
+        )
+    )
+
+
+    heading_arrow.set_positions(
+        (
             current_robot_x,
+            current_robot_y
+        ),
+        (
             current_robot_x
             +
-            heading_dx
-        ],
-        [
-            current_robot_y,
+            heading_dx,
             current_robot_y
             +
             heading_dy
-        ]
+        )
     )
 
 
@@ -976,14 +1273,14 @@ def localization_update():
     if current_localization_valid:
 
         localization_status_label.config(
-            text="LOCALIZATION: VALID"
+            text="LIDAR LOCALIZATION: VALID"
         )
 
 
     else:
 
         localization_status_label.config(
-            text="LOCALIZATION: HOLD"
+            text="LIDAR LOCALIZATION: HOLD"
         )
 
 
@@ -1657,7 +1954,7 @@ ttk.Separator(
 
 localization_title = ttk.Label(
     control_frame,
-    text="LiDAR Localization",
+    text="RobotPose Tracking",
     font=(
         "Arial",
         11,
@@ -1700,7 +1997,7 @@ pose_heading_label.pack()
 
 localization_status_label = ttk.Label(
     control_frame,
-    text="LOCALIZATION: HOLD",
+    text="LIDAR LOCALIZATION: HOLD",
     font=(
         "Arial",
         10,
@@ -1820,12 +2117,12 @@ route_axis.set_title(
 
 
 route_axis.set_xlabel(
-    "World X (m)"
+    "Display X (m)"
 )
 
 
 route_axis.set_ylabel(
-    "World Y (m)"
+    "Display Y (m)"
 )
 
 
@@ -1867,17 +2164,24 @@ route_line, = route_axis.plot(
 robot_marker, = route_axis.plot(
     [],
     [],
-    marker="^",
+    marker="o",
     linestyle="None",
-    markersize=10,
+    markersize=8,
     label="Robot"
 )
 
 
-heading_line, = route_axis.plot(
-    [],
-    [],
+heading_arrow = FancyArrowPatch(
+    (0.0, 0.0),
+    (HEADING_ARROW_LENGTH_M, 0.0),
+    arrowstyle="-|>",
+    mutation_scale=16,
     linewidth=2
+)
+
+
+route_axis.add_patch(
+    heading_arrow
 )
 
 

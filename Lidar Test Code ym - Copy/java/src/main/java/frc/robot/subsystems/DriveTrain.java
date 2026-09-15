@@ -95,6 +95,31 @@ public class DriveTrain extends SubsystemBase
 
 
     // =====================================================
+    // KEYBOARD COMMAND STATE FOR ODOMETRY FILTERING
+    //
+    // Used only to remove known encoder cross-coupling:
+    //
+    // - pure A/D crab: ignore tiny false forward/back drift
+    // - pure Q/E spin: keep X/Y fixed while robot rotates
+    //
+    // Motor control itself is still handled by KeyboardDrive.
+    // =====================================================
+
+    private final NetworkTable keyboardTable =
+            NetworkTableInstance
+                    .getDefault()
+                    .getTable("KeyboardDrive");
+
+
+    private static final double KEYBOARD_TRANSLATION_THRESHOLD =
+            0.05;
+
+
+    private static final double KEYBOARD_ROTATION_THRESHOLD =
+            0.05;
+
+
+    // =====================================================
     // SHUFFLEBOARD
     // =====================================================
 
@@ -190,6 +215,20 @@ public class DriveTrain extends SubsystemBase
             tab.add(
                     "Robot Y (m)",
                     0
+            ).getEntry();
+
+
+    private NetworkTableEntry pureCrabTrackingValue =
+            tab.add(
+                    "Pure Crab Tracking Filter",
+                    false
+            ).getEntry();
+
+
+    private NetworkTableEntry pureSpinTrackingValue =
+            tab.add(
+                    "Pure Spin XY Hold",
+                    false
             ).getEntry();
 
 
@@ -561,31 +600,25 @@ public class DriveTrain extends SubsystemBase
 
     // =====================================================
     // RESET YAW
-    // DISABLED
+    //
+    // Makes the robot's CURRENT physical direction become
+    // corrected heading 0 degrees.
+    //
+    // This is important for LIDAR_MOVING because
+    // NavigateOneMeter holds heading 0 while driving
+    // straight. Without refreshing this reference when the
+    // mode starts, the robot can curve while trying to turn
+    // back toward an old heading reference.
     // =====================================================
 
     public void resetYaw()
     {
-        /*
-         * RESET YAW DISABLED.
-         *
-         * Original code:
-         *
-         * yawOffset =
-         *         navx.getYaw();
-         *
-         * yawReferenceSet =
-         *         true;
-         *
-         * Keeping this method so other commands that call
-         * resetYaw() will still compile.
-         */
+        yawOffset =
+                navx.getYaw();
 
-        // yawOffset =
-        //         navx.getYaw();
 
-        // yawReferenceSet =
-        //         true;
+        yawReferenceSet =
+                true;
     }
 
 
@@ -652,7 +685,7 @@ public class DriveTrain extends SubsystemBase
 
         resetEncoders();
 
-        // resetYaw() is now disabled.
+        // Current physical direction becomes heading 0°.
         resetYaw();
     }
 
@@ -740,6 +773,118 @@ public class DriveTrain extends SubsystemBase
                 )
                 -
                 deltaBack;
+
+
+        // =================================================
+        // KEYBOARD MOTION TYPE
+        //
+        // NetworkTables contains the USER command before
+        // KeyboardDrive adds its small navX crab correction.
+        // That means pure A/D still appears here as Z = 0,
+        // which is exactly what we want for this filter.
+        // =================================================
+
+        boolean keyboardEnabled =
+                keyboardTable
+                        .getEntry("Enabled")
+                        .getBoolean(false);
+
+
+        double keyboardX =
+                keyboardTable
+                        .getEntry("X")
+                        .getDouble(0.0);
+
+
+        double keyboardY =
+                keyboardTable
+                        .getEntry("Y")
+                        .getDouble(0.0);
+
+
+        double keyboardZ =
+                keyboardTable
+                        .getEntry("Z")
+                        .getDouble(0.0);
+
+
+        boolean pureKeyboardCrab =
+                keyboardEnabled
+                &&
+                Math.abs(keyboardX)
+                >=
+                KEYBOARD_TRANSLATION_THRESHOLD
+                &&
+                Math.abs(keyboardY)
+                <
+                KEYBOARD_TRANSLATION_THRESHOLD
+                &&
+                Math.abs(keyboardZ)
+                <
+                KEYBOARD_ROTATION_THRESHOLD;
+
+
+        boolean pureKeyboardSpin =
+                keyboardEnabled
+                &&
+                Math.abs(keyboardZ)
+                >=
+                KEYBOARD_ROTATION_THRESHOLD
+                &&
+                Math.abs(keyboardX)
+                <
+                KEYBOARD_TRANSLATION_THRESHOLD
+                &&
+                Math.abs(keyboardY)
+                <
+                KEYBOARD_TRANSLATION_THRESHOLD;
+
+
+        // =================================================
+        // PURE A / D CRAB TRACKING FILTER
+        //
+        // Ideal pure crab has localY = 0.
+        //
+        // Small left/right wheel differences can otherwise
+        // create a false localY term and bend the plotted
+        // crab route even when the robot is moving sideways.
+        // =================================================
+
+        if (pureKeyboardCrab)
+        {
+            localY =
+                    0.0;
+        }
+
+
+        // =================================================
+        // PURE Q / E SPIN X/Y HOLD
+        //
+        // During an in-place spin the robot centre should
+        // not translate. Encoder mismatch used to create a
+        // false circular route. Consume the encoder deltas
+        // normally, but do not add them to X/Y.
+        // =================================================
+
+        if (pureKeyboardSpin)
+        {
+            localX =
+                    0.0;
+
+
+            localY =
+                    0.0;
+        }
+
+
+        pureCrabTrackingValue.setBoolean(
+                pureKeyboardCrab
+        );
+
+
+        pureSpinTrackingValue.setBoolean(
+                pureKeyboardSpin
+        );
 
 
         // =================================================

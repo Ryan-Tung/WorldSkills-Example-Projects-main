@@ -59,6 +59,48 @@ public class KeyboardDrive extends CommandBase
 
 
     // =====================================================
+    // PURE CRAB HEADING HOLD
+    //
+    // A / D should move sideways without slowly turning.
+    //
+    // When a pure crab command begins, remember the current
+    // navX heading. A small Z correction is then added to
+    // keep that heading while the robot moves sideways.
+    // =====================================================
+
+    private static final double CRAB_COMMAND_THRESHOLD =
+            0.05;
+
+
+    private static final double CRAB_HEADING_KP =
+            0.015;
+
+
+    private static final double CRAB_HEADING_DEADBAND_DEG =
+            0.50;
+
+
+    private static final double CRAB_MAX_TURN_CORRECTION =
+            0.10;
+
+
+    private boolean crabHeadingHoldActive =
+            false;
+
+
+    private double crabHeadingTarget =
+            0.0;
+
+
+    private double crabHeadingError =
+            0.0;
+
+
+    private double crabTurnCorrection =
+            0.0;
+
+
+    // =====================================================
     // CONSTRUCTOR
     // =====================================================
 
@@ -94,6 +136,22 @@ public class KeyboardDrive extends CommandBase
                 Timer.getFPGATimestamp();
 
 
+        crabHeadingHoldActive =
+                false;
+
+
+        crabHeadingTarget =
+                drive.getYaw();
+
+
+        crabHeadingError =
+                0.0;
+
+
+        crabTurnCorrection =
+                0.0;
+
+
         SmartDashboard.putString(
                 "Keyboard Drive State",
                 "WAITING"
@@ -114,6 +172,30 @@ public class KeyboardDrive extends CommandBase
 
         SmartDashboard.putNumber(
                 "Keyboard Z",
+                0.0
+        );
+
+
+        SmartDashboard.putBoolean(
+                "Crab Heading Hold",
+                false
+        );
+
+
+        SmartDashboard.putNumber(
+                "Crab Heading Target",
+                crabHeadingTarget
+        );
+
+
+        SmartDashboard.putNumber(
+                "Crab Heading Error",
+                0.0
+        );
+
+
+        SmartDashboard.putNumber(
+                "Crab Turn Correction",
                 0.0
         );
     }
@@ -253,6 +335,97 @@ public class KeyboardDrive extends CommandBase
 
 
         // =================================================
+        // PURE A / D CRAB HEADING HOLD
+        //
+        // Pure crab means:
+        //
+        // X != 0
+        // Y  = 0
+        // Z  = 0
+        //
+        // W+A, W+D, A+Q, D+E, etc. are NOT treated as
+        // pure crab, so the user's combined commands are
+        // preserved exactly.
+        // =================================================
+
+        boolean pureCrab =
+                Math.abs(x)
+                >=
+                CRAB_COMMAND_THRESHOLD
+                &&
+                Math.abs(y)
+                <
+                CRAB_COMMAND_THRESHOLD
+                &&
+                Math.abs(z)
+                <
+                CRAB_COMMAND_THRESHOLD;
+
+
+        if (pureCrab)
+        {
+            if (!crabHeadingHoldActive)
+            {
+                crabHeadingTarget =
+                        drive.getYaw();
+
+
+                crabHeadingHoldActive =
+                        true;
+            }
+
+
+            crabHeadingError =
+                    normalizeAngle(
+                            crabHeadingTarget
+                            -
+                            drive.getYaw()
+                    );
+
+
+            if (
+                Math.abs(
+                        crabHeadingError
+                )
+                <=
+                CRAB_HEADING_DEADBAND_DEG
+            )
+            {
+                crabTurnCorrection =
+                        0.0;
+            }
+            else
+            {
+                crabTurnCorrection =
+                        clamp(
+                                CRAB_HEADING_KP
+                                *
+                                crabHeadingError,
+                                -CRAB_MAX_TURN_CORRECTION,
+                                CRAB_MAX_TURN_CORRECTION
+                        );
+            }
+
+
+            z =
+                    crabTurnCorrection;
+        }
+        else
+        {
+            crabHeadingHoldActive =
+                    false;
+
+
+            crabHeadingError =
+                    0.0;
+
+
+            crabTurnCorrection =
+                    0.0;
+        }
+
+
+        // =================================================
         // DRIVE
         //
         // +X = crab right
@@ -294,10 +467,59 @@ public class KeyboardDrive extends CommandBase
         );
 
 
+        SmartDashboard.putBoolean(
+                "Crab Heading Hold",
+                crabHeadingHoldActive
+        );
+
+
+        SmartDashboard.putNumber(
+                "Crab Heading Target",
+                crabHeadingTarget
+        );
+
+
+        SmartDashboard.putNumber(
+                "Crab Heading Error",
+                crabHeadingError
+        );
+
+
+        SmartDashboard.putNumber(
+                "Crab Turn Correction",
+                crabTurnCorrection
+        );
+
+
         SmartDashboard.putString(
                 "Keyboard Drive State",
                 "RUNNING"
         );
+    }
+
+
+    // =====================================================
+    // NORMALIZE ANGLE
+    // =====================================================
+
+    private double normalizeAngle(
+            double angle)
+    {
+        while (angle > 180.0)
+        {
+            angle -=
+                    360.0;
+        }
+
+
+        while (angle < -180.0)
+        {
+            angle +=
+                    360.0;
+        }
+
+
+        return angle;
     }
 
 
@@ -332,6 +554,18 @@ public class KeyboardDrive extends CommandBase
 
     private void stopDrive()
     {
+        crabHeadingHoldActive =
+                false;
+
+
+        crabHeadingError =
+                0.0;
+
+
+        crabTurnCorrection =
+                0.0;
+
+
         drive.holonomicDrive(
                 0.0,
                 0.0,
@@ -353,6 +587,24 @@ public class KeyboardDrive extends CommandBase
 
         SmartDashboard.putNumber(
                 "Keyboard Z",
+                0.0
+        );
+
+
+        SmartDashboard.putBoolean(
+                "Crab Heading Hold",
+                false
+        );
+
+
+        SmartDashboard.putNumber(
+                "Crab Heading Error",
+                0.0
+        );
+
+
+        SmartDashboard.putNumber(
+                "Crab Turn Correction",
                 0.0
         );
     }
