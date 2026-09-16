@@ -40,36 +40,84 @@ public class FusionLocalization extends SubsystemBase
 
     private final NetworkTable lidarTable;
     private final NetworkTable fusionTable;
+    private final NetworkTable keyboardTable;
 
 
     // =====================================================
     // FUSION SETTINGS
     //
-    // Encoder odometry is the continuous prediction.
-    // LiDAR does NOT replace the encoder position directly.
-    // It gently corrects accumulated encoder drift.
+    // SENSOR-DRIVEN FUSION TEST
+    //
+    // IMPORTANT:
+    //
+    // The estimator does NOT decide movement from keyboard keys.
+    //
+    // Encoder odometry:
+    //     always predicts X/Y from actual wheel movement.
+    //
+    // navX:
+    //     always provides heading.
+    //
+    // LiDAR ICP:
+    //     corrects encoder X/Y whenever a fresh valid LiDAR
+    //     observation is available.
+    //
+    // Therefore:
+    //
+    // - Q/E is NOT hard locked to zero X/Y.
+    // - idle is NOT hard locked to zero X/Y.
+    // - collision/wheel slip is allowed to appear in encoder
+    //   prediction and then be corrected by LiDAR.
+    //
+    // Keyboard values are retained ONLY for debugging.
+    // They are not used to decide whether fusion may move.
     // =====================================================
+
+    private static final double COMMAND_THRESHOLD = 0.05;
+
+    // Raw encoder distances in this project are millimetres.
+    private static final double ENCODER_TO_METERS = 1.0 / 1000.0;
+
+    // Ignore extremely tiny encoder quantisation/noise only.
+    private static final double ENCODER_DELTA_DEADBAND_M = 0.0005;
+
+    // Reject only a physically impossible one-cycle encoder jump.
+    private static final double MAX_ENCODER_STEP_M = 0.15;
+
+
+    // -----------------------------------------------------
+    // LIDAR COMPLEMENTARY CORRECTION
+    //
+    // These are estimator tuning parameters, NOT keyboard
+    // rules.
+    //
+    // LiDAR is allowed to correct meaningful disagreement,
+    // including wheel slip / collision drift.
+    //
+    // A very large innovation is still rejected as a likely
+    // bad ICP association / frame error.
+    // -----------------------------------------------------
 
     private static final double LIDAR_CORRECTION_GAIN = 0.15;
 
-    // Ignore extremely small disagreement between the two
-    // localization systems.
     private static final double LIDAR_CORRECTION_DEADBAND_M = 0.01;
 
-    // Reject a LiDAR correction if it suddenly disagrees with
-    // the encoder prediction by more than this amount.
-    // This helps protect against a bad ICP match / jump.
-    private static final double MAX_LIDAR_ERROR_M = 0.75;
+    private static final double MAX_LIDAR_INNOVATION_M = 0.75;
 
-    // Even for a valid correction, do not let LiDAR move the
-    // fused pose by more than this in one correction update.
     private static final double MAX_LIDAR_CORRECTION_STEP_M = 0.05;
 
-    // Reject only an impossible one-cycle encoder jump.
-    // Normal wheel slip is NOT hidden; LiDAR is supposed to
-    // correct that gradually. 0.15 m in one 20 ms robot loop
-    // is far beyond normal motion for this training robot.
-    private static final double MAX_ENCODER_STEP_M = 0.15;
+
+    // -----------------------------------------------------
+    // LIDAR QUALITY GATE
+    //
+    // Python already publishes ICPError and InlierRatio.
+    // Use actual localization quality rather than keyboard
+    // state to decide whether a LiDAR correction is trusted.
+    // -----------------------------------------------------
+
+    private static final double MAX_LIDAR_ICP_ERROR_M = 0.16;
+
+    private static final double MIN_LIDAR_INLIER_RATIO = 0.20;
 
 
     // =====================================================
@@ -84,18 +132,27 @@ public class FusionLocalization extends SubsystemBase
 
 
     // =====================================================
-    // ENCODER REFERENCE
+    // ENCODER / HEADING REFERENCE
     //
-    // We do NOT reset DriveTrain.java.
+    // IMPORTANT:
     //
-    // The encoder pose that exists when fusion starts becomes
-    // our own local fusion origin.
+    // Fusion now reads the THREE wheel encoders directly.
+    //
+    // It does NOT use DriveTrain.getRobotX()/getRobotY() as
+    // the movement source.
+    //
+    // This avoids:
+    // - old RobotPose filters affecting fusion
+    // - world-frame re-zero problems
+    // - accumulated RobotPose state being reinterpreted after
+    //   a fusion reset
     // =====================================================
 
     private double encoderStartHeading = 0.0;
 
-    private double previousEncoderX = 0.0;
-    private double previousEncoderY = 0.0;
+    private double previousLeftDistance = 0.0;
+    private double previousRightDistance = 0.0;
+    private double previousBackDistance = 0.0;
 
 
     // =====================================================
@@ -191,6 +248,13 @@ public class FusionLocalization extends SubsystemBase
                         .getTable(
                                 "FusionLocalization"
                         );
+
+        keyboardTable =
+                NetworkTableInstance
+                        .getDefault()
+                        .getTable(
+                                "KeyboardDrive"
+                        );
     }
 
 
@@ -215,11 +279,14 @@ public class FusionLocalization extends SubsystemBase
         fusedY = 0.0;
         fusedHeading = 0.0;
 
-        previousEncoderX =
-                driveTrain.getRobotX();
+        previousLeftDistance =
+                driveTrain.getLeftEncoderDistance();
 
-        previousEncoderY =
-                driveTrain.getRobotY();
+        previousRightDistance =
+                driveTrain.getRightEncoderDistance();
+
+        previousBackDistance =
+                driveTrain.getBackEncoderDistance();
 
         encoderStartHeading =
                 driveTrain.getRobotHeading();
@@ -365,106 +432,340 @@ public class FusionLocalization extends SubsystemBase
 
 
     // =====================================================
+    // KEYBOARD COMMAND STATE
+    // =====================================================
+
+    private double getCommandX()
+    {
+        return keyboardTable
+                .getEntry("X")
+                .getDouble(0.0);
+    }
+
+
+    private double getCommandY()
+    {
+        return keyboardTable
+                .getEntry("Y")
+                .getDouble(0.0);
+    }
+
+
+    private double getCommandZ()
+    {
+        return keyboardTable
+                .getEntry("Z")
+                .getDouble(0.0);
+    }
+
+
+    private boolean isTranslationCommanded()
+    {
+        return (
+                Math.abs(getCommandX())
+                >=
+                COMMAND_THRESHOLD
+                ||
+                Math.abs(getCommandY())
+                >=
+                COMMAND_THRESHOLD
+        );
+    }
+
+
+    private boolean isRotationCommanded()
+    {
+        return (
+                Math.abs(getCommandZ())
+                >=
+                COMMAND_THRESHOLD
+        );
+    }
+
+
+    private boolean isPureRotationCommanded()
+    {
+        return (
+                isRotationCommanded()
+                &&
+                !isTranslationCommanded()
+        );
+    }
+
+
+    private boolean isIdleCommand()
+    {
+        return (
+                !isTranslationCommanded()
+                &&
+                !isRotationCommanded()
+        );
+    }
+
+
+    // =====================================================
     // ENCODER PREDICTION
     //
     // Encoder odometry provides the fast continuous movement.
     //
     // IMPORTANT:
-    // We do NOT freeze encoder X/Y during Q/E or collisions.
-    // If the wheels really produce odometry movement, fusion
-    // receives it. LiDAR then corrects wheel-slip drift.
+    // There is NO keyboard-based X/Y freeze in this version.
+    //
+    // Actual encoder motion is always processed.
+    // LiDAR then corrects accumulated odometry error.
     // =====================================================
 
     private void updateEncoderPrediction()
     {
-        double currentEncoderX =
-                driveTrain.getRobotX();
+        // -------------------------------------------------
+        // READ RAW THREE-WHEEL ENCODER DISTANCES
+        // -------------------------------------------------
 
-        double currentEncoderY =
-                driveTrain.getRobotY();
+        double currentLeft =
+                driveTrain.getLeftEncoderDistance();
 
-        double currentHeading =
-                driveTrain.getRobotHeading();
+        double currentRight =
+                driveTrain.getRightEncoderDistance();
+
+        double currentBack =
+                driveTrain.getBackEncoderDistance();
 
 
         // -------------------------------------------------
-        // Movement since the previous fusion update
+        // WHEEL MOVEMENT SINCE PREVIOUS ROBOT LOOP
         // -------------------------------------------------
 
-        double encoderDeltaWorldX =
-                currentEncoderX
+        double deltaLeft =
+                currentLeft
                 -
-                previousEncoderX;
+                previousLeftDistance;
 
-        double encoderDeltaWorldY =
-                currentEncoderY
+        double deltaRight =
+                currentRight
                 -
-                previousEncoderY;
+                previousRightDistance;
+
+        double deltaBack =
+                currentBack
+                -
+                previousBackDistance;
 
 
-        // Always consume newest encoder values so a rejected
-        // spike cannot become another jump next cycle.
-        previousEncoderX =
-                currentEncoderX;
+        /*
+         * ALWAYS consume the latest encoder values.
+         *
+         * This is critical for Q/E:
+         *
+         * Q/E may physically make the wheels move, but because
+         * pure rotation must NOT move the X/Y route, those
+         * encoder changes are deliberately ignored.
+         *
+         * Updating the baseline here prevents that ignored
+         * rotation movement from becoming a position jump when
+         * W/A/S/D is pressed afterwards.
+         */
 
-        previousEncoderY =
-                currentEncoderY;
+        previousLeftDistance =
+                currentLeft;
+
+        previousRightDistance =
+                currentRight;
+
+        previousBackDistance =
+                currentBack;
+
+
+        // -------------------------------------------------
+        // HEADING IS ALWAYS navX
+        // -------------------------------------------------
+
+        double previousFusionHeading =
+                fusedHeading;
+
+        double currentFusionHeading =
+                normalizeHeading(
+                        driveTrain.getRobotHeading()
+                        -
+                        encoderStartHeading
+                );
+
+
+        fusedHeading =
+                currentFusionHeading;
+
+
+        // -------------------------------------------------
+        // NO COMMAND-BASED X/Y LOCK
+        //
+        // Fusion is being tested as a real sensor estimator.
+        //
+        // Even during:
+        // - pure Q/E rotation
+        // - idle
+        // - wheel slip
+        // - a collision
+        //
+        // we still evaluate the actual wheel encoder deltas.
+        //
+        // In an ideal in-place rotation the 3-wheel geometry
+        // should naturally produce approximately zero X/Y.
+        //
+        // If wheel imperfections produce false translation,
+        // LiDAR is allowed to correct it later.
+        // -------------------------------------------------
+
+
+        // -------------------------------------------------
+        // THREE-WHEEL HOLONOMIC ODOMETRY
+        //
+        // Robot-local:
+        //
+        // +X = crab right
+        // +Y = forward
+        // -------------------------------------------------
+
+        double localYmm =
+                (
+                    deltaLeft
+                    -
+                    deltaRight
+                )
+                /
+                2.0;
+
+
+        double localXmm =
+                (
+                    (
+                        deltaLeft
+                        +
+                        deltaRight
+                    )
+                    /
+                    (
+                        2.0
+                        *
+                        Math.sqrt(3.0)
+                    )
+                )
+                -
+                deltaBack;
+
+
+        double localX =
+                localXmm
+                *
+                ENCODER_TO_METERS;
+
+        double localY =
+                localYmm
+                *
+                ENCODER_TO_METERS;
 
 
         double encoderStepM =
                 Math.hypot(
-                        encoderDeltaWorldX,
-                        encoderDeltaWorldY
+                        localX,
+                        localY
                 );
 
 
         // -------------------------------------------------
-        // Reject only an impossible instantaneous jump.
-        // Normal wheel slip remains visible and is corrected
-        // by LiDAR through the fusion correction below.
+        // TINY ENCODER NOISE
+        // -------------------------------------------------
+
+        if (encoderStepM < ENCODER_DELTA_DEADBAND_M)
+        {
+            return;
+        }
+
+
+        // -------------------------------------------------
+        // IMPOSSIBLE ONE-CYCLE JUMP
         // -------------------------------------------------
 
         if (encoderStepM > MAX_ENCODER_STEP_M)
         {
             rejectedEncoderSteps++;
 
-            fusedHeading =
-                    normalizeHeading(
-                            currentHeading
-                            -
-                            encoderStartHeading
-                    );
-
             return;
         }
 
 
         // -------------------------------------------------
-        // Convert DriveTrain world movement into fusion frame
+        // USE MIDPOINT HEADING FOR MOVE + TURN
+        //
+        // This improves W+Q / W+E / A+Q etc.
         // -------------------------------------------------
 
-        double[] encoderDeltaFusion =
-                rotateIntoFrame(
-                        encoderDeltaWorldX,
-                        encoderDeltaWorldY,
-                        encoderStartHeading
+        double headingDelta =
+                normalizeHeading(
+                        currentFusionHeading
+                        -
+                        previousFusionHeading
+                );
+
+
+        double midpointHeading =
+                normalizeHeading(
+                        previousFusionHeading
+                        +
+                        (
+                            headingDelta
+                            /
+                            2.0
+                        )
+                );
+
+
+        double headingRad =
+                Math.toRadians(
+                        midpointHeading
+                );
+
+
+        // -------------------------------------------------
+        // ROBOT-LOCAL MOVEMENT -> FUSION WORLD FRAME
+        //
+        // Same convention as the existing drivetrain:
+        //
+        // worldX = localX*cos + localY*sin
+        // worldY = -localX*sin + localY*cos
+        // -------------------------------------------------
+
+        double worldDeltaX =
+                localX
+                *
+                Math.cos(
+                        headingRad
+                )
+                +
+                localY
+                *
+                Math.sin(
+                        headingRad
+                );
+
+
+        double worldDeltaY =
+                -localX
+                *
+                Math.sin(
+                        headingRad
+                )
+                +
+                localY
+                *
+                Math.cos(
+                        headingRad
                 );
 
 
         fusedX +=
-                encoderDeltaFusion[0];
+                worldDeltaX;
 
         fusedY +=
-                encoderDeltaFusion[1];
-
-
-        // Heading is authoritative from navX.
-        fusedHeading =
-                normalizeHeading(
-                        currentHeading
-                        -
-                        encoderStartHeading
-                );
+                worldDeltaY;
     }
 
 
@@ -517,6 +818,22 @@ public class FusionLocalization extends SubsystemBase
         return (long) lidarTable
                 .getEntry("ResetId")
                 .getDouble(-1.0);
+    }
+
+
+    private double getLidarIcpError()
+    {
+        return lidarTable
+                .getEntry("ICPError")
+                .getDouble(9999.0);
+    }
+
+
+    private double getLidarInlierRatio()
+    {
+        return lidarTable
+                .getEntry("InlierRatio")
+                .getDouble(0.0);
     }
 
 
@@ -618,6 +935,13 @@ public class FusionLocalization extends SubsystemBase
                 getLidarResetId();
 
 
+        double lidarIcpError =
+                getLidarIcpError();
+
+        double lidarInlierRatio =
+                getLidarInlierRatio();
+
+
         lastSeenLidarSampleId =
                 lidarSampleId;
 
@@ -711,6 +1035,52 @@ public class FusionLocalization extends SubsystemBase
 
 
         // -------------------------------------------------
+        // LIDAR QUALITY GATE
+        //
+        // IMPORTANT:
+        //
+        // Correction is based on SENSOR QUALITY, not keyboard
+        // commands.
+        //
+        // A fresh LiDAR observation is trusted when:
+        //
+        // - Python says localization is valid
+        // - ICP residual is reasonable
+        // - enough matched points agree
+        //
+        // This allows fusion to correct:
+        //
+        // - rotation-induced encoder translation
+        // - idle encoder drift
+        // - wheel slip
+        // - collision drift
+        //
+        // without hard-coding what X/Y "should" do based on
+        // W/A/S/D/Q/E.
+        // -------------------------------------------------
+
+        boolean lidarQualityGood =
+                lidarIcpError
+                <=
+                MAX_LIDAR_ICP_ERROR_M
+                &&
+                lidarInlierRatio
+                >=
+                MIN_LIDAR_INLIER_RATIO;
+
+
+        if (!lidarQualityGood)
+        {
+            rejectedLidarCorrections++;
+
+            lastCorrectionAppliedM =
+                    0.0;
+
+            return;
+        }
+
+
+        // -------------------------------------------------
         // LIDAR DISPLACEMENT FROM ITS REFERENCE
         // -------------------------------------------------
 
@@ -795,10 +1165,15 @@ public class FusionLocalization extends SubsystemBase
 
 
         // -------------------------------------------------
-        // HUGE DIFFERENCE -> likely bad ICP / wrong match
+        // EXTREME INNOVATION -> likely wrong association/frame
+        //
+        // Normal wheel-slip / collision disagreement is allowed
+        // through and corrected gradually.
+        //
+        // Only a very large mismatch is rejected.
         // -------------------------------------------------
 
-        if (errorDistance > MAX_LIDAR_ERROR_M)
+        if (errorDistance > MAX_LIDAR_INNOVATION_M)
         {
             rejectedLidarCorrections++;
 
@@ -922,11 +1297,14 @@ public class FusionLocalization extends SubsystemBase
         // Capture CURRENT encoder odometry as the new origin.
         // -------------------------------------------------
 
-        previousEncoderX =
-                driveTrain.getRobotX();
+        previousLeftDistance =
+                driveTrain.getLeftEncoderDistance();
 
-        previousEncoderY =
-                driveTrain.getRobotY();
+        previousRightDistance =
+                driveTrain.getRightEncoderDistance();
+
+        previousBackDistance =
+                driveTrain.getBackEncoderDistance();
 
 
         // -------------------------------------------------
@@ -1177,6 +1555,60 @@ public class FusionLocalization extends SubsystemBase
                 );
 
 
+        /*
+         * Kept for compatibility/debugging only.
+         *
+         * XYLocked is always false in this sensor-driven fusion
+         * version because keyboard state no longer freezes the
+         * estimator.
+         */
+        fusionTable
+                .getEntry("XYLocked")
+                .setBoolean(false);
+
+        fusionTable
+                .getEntry("PureRotation")
+                .setBoolean(
+                        isPureRotationCommanded()
+                );
+
+        fusionTable
+                .getEntry("EstimatorMode")
+                .setString(
+                        "SENSOR_DRIVEN_NO_COMMAND_GATING"
+                );
+
+        fusionTable
+                .getEntry("LidarICPError")
+                .setDouble(
+                        getLidarIcpError()
+                );
+
+        fusionTable
+                .getEntry("LidarInlierRatio")
+                .setDouble(
+                        getLidarInlierRatio()
+                );
+
+        fusionTable
+                .getEntry("CommandX")
+                .setDouble(
+                        getCommandX()
+                );
+
+        fusionTable
+                .getEntry("CommandY")
+                .setDouble(
+                        getCommandY()
+                );
+
+        fusionTable
+                .getEntry("CommandZ")
+                .setDouble(
+                        getCommandZ()
+                );
+
+
         // -------------------------------------------------
         // SMARTDASHBOARD
         // -------------------------------------------------
@@ -1224,6 +1656,36 @@ public class FusionLocalization extends SubsystemBase
         SmartDashboard.putNumber(
                 "FusionLocalization/LastLidarSampleId",
                 lastSeenLidarSampleId
+        );
+
+
+        SmartDashboard.putString(
+                "FusionLocalization/EstimatorMode",
+                "SENSOR_DRIVEN_NO_COMMAND_GATING"
+        );
+
+
+        SmartDashboard.putNumber(
+                "FusionLocalization/LidarICPError",
+                getLidarIcpError()
+        );
+
+
+        SmartDashboard.putNumber(
+                "FusionLocalization/LidarInlierRatio",
+                getLidarInlierRatio()
+        );
+
+
+        SmartDashboard.putNumber(
+                "FusionLocalization/LidarAlignedX",
+                lastLidarAlignedX
+        );
+
+
+        SmartDashboard.putNumber(
+                "FusionLocalization/LidarAlignedY",
+                lastLidarAlignedY
         );
     }
 

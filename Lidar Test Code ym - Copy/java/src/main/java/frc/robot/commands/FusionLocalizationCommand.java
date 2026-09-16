@@ -68,6 +68,13 @@ public class FusionLocalizationCommand extends CommandBase
                 "FusionLocalizationCommand/Status",
                 "RUNNING"
         );
+
+
+        SmartDashboard.putBoolean(
+                "FusionLocalizationCommand/Active",
+                fusionLocalization
+                        .isFusionActive()
+        );
     }
 
 
@@ -121,6 +128,13 @@ public class FusionLocalizationCommand extends CommandBase
                 fusionLocalization
                         .getLastCorrectionErrorM()
         );
+
+
+        SmartDashboard.putBoolean(
+                "FusionLocalizationCommand/Active",
+                fusionLocalization
+                        .isFusionActive()
+        );
     }
 
 
@@ -141,6 +155,12 @@ public class FusionLocalizationCommand extends CommandBase
                 interrupted
                         ? "INTERRUPTED"
                         : "FINISHED"
+        );
+
+
+        SmartDashboard.putBoolean(
+                "FusionLocalizationCommand/Active",
+                false
         );
     }
 

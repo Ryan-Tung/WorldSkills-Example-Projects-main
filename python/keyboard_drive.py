@@ -68,6 +68,18 @@ MOVE_SPEED = 0.25
 
 TURN_SPEED = 0.15
 
+# Movement-state thresholds.
+#
+# Pure Q/E:
+#     rotate in place
+#     X/Y route should stay fixed
+#
+# W+Q, W+E, S+Q, S+E, A/D + Q/E:
+#     translation + rotation together
+#     route should form a curve
+COMMAND_MOVE_THRESHOLD = 0.05
+COMMAND_TURN_THRESHOLD = 0.05
+
 
 # ============================================================
 # UPDATE RATES
@@ -299,18 +311,116 @@ def calculate_drive():
 
 
 # ============================================================
-# IS ROBOT BEING COMMANDED TO MOVE?
+# COMMAND STATE HELPERS
+#
+# These helpers make the intended behavior explicit:
+#
+# W/S/A/D:
+#     translation only
+#
+# Q/E:
+#     rotation only
+#
+# W+Q / W+E / S+Q / S+E / A/D+Q/E:
+#     translation + rotation together
+#     -> CURVED MOTION
 # ============================================================
+
+def translation_commanded():
+
+    return (
+        abs(current_command_x)
+        >=
+        COMMAND_MOVE_THRESHOLD
+        or
+        abs(current_command_y)
+        >=
+        COMMAND_MOVE_THRESHOLD
+    )
+
+
+def rotation_commanded():
+
+    return (
+        abs(current_command_z)
+        >=
+        COMMAND_TURN_THRESHOLD
+    )
+
+
+def pure_rotation_commanded():
+
+    return (
+        rotation_commanded()
+        and
+        not translation_commanded()
+    )
+
+
+def combined_move_and_turn_commanded():
+
+    return (
+        translation_commanded()
+        and
+        rotation_commanded()
+    )
+
 
 def robot_is_moving():
 
     return (
-        abs(current_command_x) > 0.001
+        translation_commanded()
         or
-        abs(current_command_y) > 0.001
-        or
-        abs(current_command_z) > 0.001
+        rotation_commanded()
     )
+
+
+def current_motion_text():
+
+    if combined_move_and_turn_commanded():
+
+        if current_command_y > COMMAND_MOVE_THRESHOLD:
+
+            if current_command_z < -COMMAND_TURN_THRESHOLD:
+                return "FORWARD + LEFT TURN"
+
+            if current_command_z > COMMAND_TURN_THRESHOLD:
+                return "FORWARD + RIGHT TURN"
+
+        if current_command_y < -COMMAND_MOVE_THRESHOLD:
+
+            if current_command_z < -COMMAND_TURN_THRESHOLD:
+                return "BACKWARD + LEFT TURN"
+
+            if current_command_z > COMMAND_TURN_THRESHOLD:
+                return "BACKWARD + RIGHT TURN"
+
+        return "MOVE + TURN"
+
+    if pure_rotation_commanded():
+
+        if current_command_z < 0.0:
+            return "ROTATE LEFT IN PLACE"
+
+        return "ROTATE RIGHT IN PLACE"
+
+    if translation_commanded():
+
+        if current_command_y > COMMAND_MOVE_THRESHOLD:
+            return "FORWARD"
+
+        if current_command_y < -COMMAND_MOVE_THRESHOLD:
+            return "BACKWARD"
+
+        if current_command_x < -COMMAND_MOVE_THRESHOLD:
+            return "CRAB LEFT"
+
+        if current_command_x > COMMAND_MOVE_THRESHOLD:
+            return "CRAB RIGHT"
+
+        return "TRANSLATING"
+
+    return "IDLE"
 
 
 # ============================================================
@@ -390,6 +500,11 @@ def send_stop():
 
     z_value_label.config(
         text="Z: 0.00"
+    )
+
+
+    motion_value_label.config(
+        text="Motion: IDLE"
     )
 
 
@@ -528,6 +643,15 @@ def update_drive():
     )
 
 
+    motion_value_label.config(
+        text=(
+            "Motion: "
+            +
+            current_motion_text()
+        )
+    )
+
+
     # ========================================================
     # DRIVE STATUS
     # ========================================================
@@ -539,10 +663,32 @@ def update_drive():
         )
 
 
-    elif robot_is_moving():
+    elif combined_move_and_turn_commanded():
 
         drive_status_label.config(
-            text="DRIVING"
+            text=(
+                "CURVING - "
+                +
+                current_motion_text()
+            )
+        )
+
+
+    elif pure_rotation_commanded():
+
+        drive_status_label.config(
+            text=current_motion_text()
+        )
+
+
+    elif translation_commanded():
+
+        drive_status_label.config(
+            text=(
+                "DRIVING - "
+                +
+                current_motion_text()
+            )
         )
 
 
@@ -766,6 +912,8 @@ def add_log_sample():
         "cmd_y": current_command_y,
         "cmd_z": current_command_z,
 
+        "motion": current_motion_text(),
+
         "valid": current_localization_valid
     }
 
@@ -785,14 +933,27 @@ def add_log_sample():
     # tells you which samples were VALID and which were HOLD.
     # ========================================================
 
-    route_x.append(
-        current_robot_x
-    )
+    # --------------------------------------------------------
+    # ROUTE GEOMETRY
+    #
+    # Pure Q/E:
+    #   heading changes, but no new XY route point is added.
+    #
+    # W+Q / W+E etc:
+    #   translation is present, so new points are added and the
+    #   route naturally forms a curve from the localization pose.
+    # --------------------------------------------------------
+
+    if translation_commanded():
+
+        route_x.append(
+            current_robot_x
+        )
 
 
-    route_y.append(
-        current_robot_y
-    )
+        route_y.append(
+            current_robot_y
+        )
 
 
     add_row_to_table(
@@ -1236,6 +1397,8 @@ def save_log():
                 "Command_Y",
                 "Command_Z",
 
+                "Motion",
+
                 "LocalizationValid"
             ]
         )
@@ -1256,6 +1419,8 @@ def save_log():
                     row["cmd_x"],
                     row["cmd_y"],
                     row["cmd_z"],
+
+                    row["motion"],
 
                     row["valid"]
                 ]
@@ -1783,6 +1948,10 @@ controls_label = ttk.Label(
         "D = Crab Right\n\n"
         "Q = Rotate Left\n"
         "E = Rotate Right\n\n"
+        "W+Q / W+E = Forward Curve\n"
+        "S+Q / S+E = Backward Curve\n"
+        "A/D + Q/E = Crab + Turn\n\n"
+        "Q/E only = Rotate in place\n\n"
         "SPACE = Stop Immediately\n\n"
         "P = Save Log\n"
         "C = Clear Route / Log\n"
@@ -1859,6 +2028,21 @@ z_value_label = ttk.Label(
 
 
 z_value_label.pack()
+
+
+motion_value_label = ttk.Label(
+    control_frame,
+    text="Motion: IDLE",
+    font=(
+        "Arial",
+        10,
+        "bold"
+    )
+)
+
+motion_value_label.pack(
+    pady=4
+)
 
 
 ttk.Separator(
@@ -2323,8 +2507,8 @@ table_scroll.grid(
 table_info = ttk.Label(
     table_frame,
     text=(
-        "Coordinates are automatically recorded\n"
-        "while the robot is moving."
+        "W/A/S/D + Q/E = translation + rotation curve.\n"
+        "Q/E only = heading changes without XY route movement."
     ),
     justify="center"
 )

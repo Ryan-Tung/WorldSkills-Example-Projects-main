@@ -417,6 +417,10 @@ last_relative_translation = 0.0
 
 last_navx_delta = 0.0
 
+# Monotonic counters for monitors / fusion / debugging.
+localization_sample_id = 0
+localization_reset_id = 0
+
 
 # ============================================================
 # OCCUPANCY GRID STORAGE
@@ -686,19 +690,30 @@ def reset_python_navx_zero():
 
 
 # ============================================================
-# PURE Q/E ROTATION?
+# KEYBOARD MOTION STATE
+#
+# These helpers are used ONLY to decide whether LiDAR X/Y
+# translation should be estimated.
+#
+# Pure Q/E:
+#   X/Y HOLD
+#   navX heading changes
+#
+# W/S/A/D:
+#   X/Y tracked by LiDAR ICP
+#
+# W+Q / W+E / S+Q / S+E / A/D+Q/E:
+#   X/Y tracked by LiDAR ICP
+#   navX heading changes at the same time
+#   -> curved route
 # ============================================================
 
-def pure_rotation_commanded():
+def get_keyboard_command_state():
 
     enabled = keyboard_table.getBoolean(
         "Enabled",
         False
     )
-
-    if not enabled:
-
-        return False
 
     command_x = keyboard_table.getNumber(
         "X",
@@ -715,18 +730,103 @@ def pure_rotation_commanded():
         0.0
     )
 
-    return (
+    translation = (
+        enabled
+        and
+        (
+            abs(command_x)
+            >=
+            KEYBOARD_MOVE_THRESHOLD
+            or
+            abs(command_y)
+            >=
+            KEYBOARD_MOVE_THRESHOLD
+        )
+    )
+
+    rotation = (
+        enabled
+        and
         abs(command_z)
         >=
         KEYBOARD_TURN_THRESHOLD
+    )
+
+    return (
+        enabled,
+        float(command_x),
+        float(command_y),
+        float(command_z),
+        translation,
+        rotation
+    )
+
+
+def translation_commanded():
+
+    (
+        _,
+        _,
+        _,
+        _,
+        translation,
+        _
+    ) = get_keyboard_command_state()
+
+    return translation
+
+
+def rotation_commanded():
+
+    (
+        _,
+        _,
+        _,
+        _,
+        _,
+        rotation
+    ) = get_keyboard_command_state()
+
+    return rotation
+
+
+def pure_rotation_commanded():
+
+    (
+        enabled,
+        _,
+        _,
+        _,
+        translation,
+        rotation
+    ) = get_keyboard_command_state()
+
+    return (
+        enabled
         and
-        abs(command_x)
-        <
-        KEYBOARD_MOVE_THRESHOLD
+        rotation
         and
-        abs(command_y)
-        <
-        KEYBOARD_MOVE_THRESHOLD
+        not translation
+    )
+
+
+def stationary_commanded():
+
+    (
+        enabled,
+        _,
+        _,
+        _,
+        translation,
+        rotation
+    ) = get_keyboard_command_state()
+
+    return (
+        enabled
+        and
+        not translation
+        and
+        not rotation
     )
 
 
@@ -1683,7 +1783,7 @@ def track_localization(
 
 
     # ========================================================
-    # NAVX IS HEADING AUTHORITY
+    # NAVX IS THE HEADING AUTHORITY
     # ========================================================
 
     robot_heading = (
@@ -1692,7 +1792,7 @@ def track_localization(
 
 
     # ========================================================
-    # FIRST SCAN
+    # FIRST VALID SCAN
     # ========================================================
 
     if previous_good_scan is None:
@@ -1719,6 +1819,8 @@ def track_localization(
 
         consecutive_hold_count = 0
 
+        last_relative_translation = 0.0
+
         store_previous_good_scan(
             current_scan
         )
@@ -1731,7 +1833,7 @@ def track_localization(
 
 
     # ========================================================
-    # HEADING CHANGE SINCE PREVIOUS SCAN
+    # HEADING CHANGE SINCE PREVIOUS REFERENCE SCAN
     # ========================================================
 
     navx_delta = heading_difference(
@@ -1745,95 +1847,78 @@ def track_localization(
 
 
     # ========================================================
-    # READ KEYBOARD COMMAND STATE
-    #
-    # IMPORTANT:
-    #
-    # We use the command ONLY as a motion-state hint.
-    # X/Y still come from LiDAR ICP.
-    #
-    # W+Q / W+E:
-    # translation_commanded = True
-    # rotation_commanded    = True
-    # -> ICP translation MUST still be accepted.
+    # READ CURRENT KEYBOARD MOTION STATE
     # ========================================================
 
-    keyboard_enabled = keyboard_table.getBoolean(
-        "Enabled",
-        False
-    )
-
-    command_x = keyboard_table.getNumber(
-        "X",
-        0.0
-    )
-
-    command_y = keyboard_table.getNumber(
-        "Y",
-        0.0
-    )
-
-    command_z = keyboard_table.getNumber(
-        "Z",
-        0.0
-    )
-
-    translation_commanded = (
-        keyboard_enabled
-        and
-        (
-            abs(command_x)
-            >=
-            KEYBOARD_MOVE_THRESHOLD
-            or
-            abs(command_y)
-            >=
-            KEYBOARD_MOVE_THRESHOLD
-        )
-    )
-
-    rotation_commanded = (
-        keyboard_enabled
-        and
-        abs(command_z)
-        >=
-        KEYBOARD_TURN_THRESHOLD
-    )
+    (
+        keyboard_enabled,
+        command_x,
+        command_y,
+        command_z,
+        translation_is_commanded,
+        rotation_is_commanded
+    ) = get_keyboard_command_state()
 
 
     # ========================================================
-    # STATIONARY HOLD
+    # PURE ROTATION / IDLE X-Y HOLD
     #
-    # When keyboard mode is active but NO movement key is
-    # pressed, the physical robot is intentionally stationary.
+    # THIS IS THE IMPORTANT FIX.
     #
-    # Do NOT let scan noise slowly move X/Y.
+    # Q / E only:
+    #   - DO NOT run translation ICP
+    #   - DO NOT change robot_x / robot_y
+    #   - heading still follows navX
+    #   - refresh reference scan every frame
     #
-    # We still refresh the reference scan so that when the
-    # next movement starts ICP compares against a fresh scan.
+    # Idle:
+    #   - same X/Y hold
+    #   - refresh reference scan every frame
+    #
+    # Because the latest scan becomes the new reference while
+    # rotating, when W/A/S/D is pressed after the turn there is
+    # no old pre-turn scan waiting to create a position jump.
     # ========================================================
 
     if (
         keyboard_enabled
         and
-        not translation_commanded
-        and
-        not rotation_commanded
+        not translation_is_commanded
     ):
 
         localization_valid = True
 
-        localization_state = (
-            "STATIONARY_HOLD"
-        )
-
         pose_locked = True
 
-        last_relative_translation = (
-            0.0
-        )
+        last_relative_translation = 0.0
+
+        last_icp_error = 0.0
+
+        last_inlier_ratio = 1.0
 
         consecutive_hold_count = 0
+
+        if rotation_is_commanded:
+
+            localization_state = (
+                "ROTATION_XY_HOLD"
+            )
+
+            rotation_hold_count += 1
+
+        else:
+
+            localization_state = (
+                "IDLE_XY_HOLD"
+            )
+
+
+        # ----------------------------------------------------
+        # IMPORTANT:
+        #
+        # Keep the same X/Y translation but refresh the scan
+        # and heading reference.
+        # ----------------------------------------------------
 
         previous_good_scan = (
             current_scan.copy()
@@ -1847,54 +1932,12 @@ def track_localization(
             robot_heading
         )
 
-        return
 
-
-    # ========================================================
-    # PURE Q/E ROTATION
-    #
-    # No translation command -> hold X/Y.
-    # Heading still follows navX.
-    #
-    # IMPORTANT:
-    # This does NOT activate for W+Q, W+E, S+Q, S+E,
-    # A+Q, etc. Those contain translation and therefore
-    # continue through ICP below.
-    # ========================================================
-
-    if (
-        rotation_commanded
-        and
-        not translation_commanded
-    ):
-
-        localization_valid = True
-
-        localization_state = (
-            "NAVX_ROTATING"
-        )
-
-        pose_locked = True
-
-        last_relative_translation = (
-            0.0
-        )
-
-        rotation_hold_count += 1
-
-        consecutive_hold_count = 0
-
-        previous_good_scan = (
-            current_scan.copy()
-        )
-
-        previous_good_translation = (
-            robot_translation.copy()
-        )
-
-        previous_navx_heading = (
-            robot_heading
-        )
+        # ----------------------------------------------------
+        # Refresh keyframe when heading moved enough.
+        #
+        # Translation stays unchanged.
+        # ----------------------------------------------------
 
         if (
             abs(
@@ -1915,17 +1958,25 @@ def track_localization(
 
 
     # ========================================================
-    # NORMAL / COMBINED MOTION LIDAR TRANSLATION
+    # IF KEYBOARD IS DISABLED
     #
-    # This includes:
+    # We do not assume the robot is stationary because it could
+    # be pushed manually. LiDAR is allowed to estimate motion.
+    # ========================================================
+
+
+    # ========================================================
+    # NORMAL / COMBINED MOTION
+    #
+    # Translation commands include:
     #
     # W, S, A, D
     # W+Q, W+E
     # S+Q, S+E
-    # A/D + turn
+    # A/D + Q/E
     #
-    # navX supplies the rotation between scans.
-    # ICP supplies translation.
+    # navX supplies the rotation.
+    # LiDAR ICP supplies translation.
     # ========================================================
 
     (
@@ -1960,14 +2011,32 @@ def track_localization(
 
 
     # ========================================================
-    # NORMAL SUCCESS
+    # NORMAL ICP SUCCESS
     # ========================================================
 
     if normal_good:
 
+        # ----------------------------------------------------
+        # TRANSLATION DIRECTION
+        #
+        # For THIS LiDAR / coordinate convention, the ICP
+        # translation already matches the robot-motion direction
+        # used by the existing localization/display frame.
+        #
+        # Using the negative value makes:
+        #     W -> appear backward
+        #     S -> appear forward
+        #
+        # Therefore keep the translation direction directly.
+        # ----------------------------------------------------
+
+        local_robot_movement = (
+            relative_translation
+        )
+
         relative_distance = float(
             np.linalg.norm(
-                relative_translation
+                local_robot_movement
             )
         )
 
@@ -1975,32 +2044,35 @@ def track_localization(
             relative_distance
         )
 
-        localization_state = (
-            "TRACKING_TURN"
-            if rotation_commanded
-            else
-            "TRACKING"
+
+        # ----------------------------------------------------
+        # MIDPOINT HEADING
+        #
+        # During W+Q / W+E the robot translates while turning.
+        # Using the heading halfway through the scan interval
+        # gives a smoother curved trajectory.
+        # ----------------------------------------------------
+
+        midpoint_heading = normalize_heading(
+            previous_navx_heading
+            +
+            (
+                navx_delta
+                *
+                0.5
+            )
         )
 
-        # ====================================================
-        # TRANSLATION -> WORLD
-        #
-        # DO NOT suppress this translation just because navX
-        # is turning. That old suppression was the reason
-        # W+Q / W+E could fail to draw a route.
-        # ====================================================
 
         world_delta = local_translation_to_world(
-            relative_translation,
-            previous_navx_heading
+            local_robot_movement,
+            midpoint_heading
         )
 
-        # ====================================================
+
+        # ----------------------------------------------------
         # MICRO-MOVEMENT FILTER
-        #
-        # Only used during actual translation tracking.
-        # Stationary drift is already handled above.
-        # ====================================================
+        # ----------------------------------------------------
 
         if (
             np.linalg.norm(
@@ -2024,6 +2096,7 @@ def track_localization(
 
             pose_locked = False
 
+
         robot_translation = (
             previous_good_translation
             +
@@ -2040,11 +2113,24 @@ def track_localization(
 
         localization_valid = True
 
+        localization_state = (
+            "TRACKING_TURN"
+            if rotation_is_commanded
+            else
+            "TRACKING"
+        )
+
         consecutive_hold_count = 0
+
+
+        # ----------------------------------------------------
+        # STORE CURRENT SCAN AS NEXT REFERENCE
+        # ----------------------------------------------------
 
         store_previous_good_scan(
             current_scan
         )
+
 
         if keyframe_needed():
 
@@ -2092,9 +2178,17 @@ def track_localization(
 
         if recovery_good:
 
+            # Keep the SAME direction convention as normal ICP.
+            #
+            # This is important so a recovery frame cannot
+            # suddenly reverse the route after normal tracking.
+            local_robot_movement = (
+                recovery_translation
+            )
+
             recovery_distance = float(
                 np.linalg.norm(
-                    recovery_translation
+                    local_robot_movement
                 )
             )
 
@@ -2102,21 +2196,14 @@ def track_localization(
                 recovery_distance
             )
 
-            localization_state = (
-                "RECOVERED_TURN"
-                if rotation_commanded
-                else
-                "RECOVERED"
-            )
 
-            # ================================================
-            # KEEP TRANSLATION DURING COMBINED TURN + MOVE
-            # ================================================
-
+            # Keyframe pose is the world reference for this
+            # recovery translation.
             world_delta = local_translation_to_world(
-                recovery_translation,
+                local_robot_movement,
                 keyframe_navx_heading
             )
+
 
             robot_translation = (
                 keyframe_translation
@@ -2133,6 +2220,13 @@ def track_localization(
             )
 
             localization_valid = True
+
+            localization_state = (
+                "RECOVERED_TURN"
+                if rotation_is_commanded
+                else
+                "RECOVERED"
+            )
 
             pose_locked = False
 
@@ -2160,18 +2254,49 @@ def track_localization(
 
 
     # ========================================================
-    # HOLD
+    # ICP FAILED
+    #
+    # Keep X/Y exactly where it was.
+    #
+    # We deliberately do NOT invent movement from a failed
+    # match.
     # ========================================================
 
     localization_valid = False
 
     localization_state = (
-        "XY_HOLD_NAVX_OK"
+        "XY_HOLD_BAD_ICP"
     )
 
     pose_locked = True
 
+    last_relative_translation = 0.0
+
     consecutive_hold_count += 1
+
+
+    # --------------------------------------------------------
+    # After several failed frames, refresh the previous scan.
+    #
+    # This prevents one bad reference from trapping the system
+    # forever, but X/Y remains unchanged during the refresh.
+    # --------------------------------------------------------
+
+    if consecutive_hold_count >= 3:
+
+        previous_good_scan = (
+            current_scan.copy()
+        )
+
+        previous_good_translation = (
+            robot_translation.copy()
+        )
+
+        previous_navx_heading = (
+            robot_heading
+        )
+
+        consecutive_hold_count = 0
 
 
 # ============================================================
@@ -2834,6 +2959,20 @@ def publish_localization(
         obstacle_distance,
         obstacle_angle):
 
+    global localization_sample_id
+
+    localization_sample_id += 1
+
+    localization_table.putNumber(
+        "SampleId",
+        localization_sample_id
+    )
+
+    localization_table.putNumber(
+        "ResetId",
+        localization_reset_id
+    )
+
     localization_table.putNumber(
         "RobotX",
         robot_x
@@ -3139,6 +3278,8 @@ def save_map():
 
 def reset_localization():
 
+    global localization_reset_id
+
     global robot_x
     global robot_y
     global robot_heading
@@ -3276,6 +3417,33 @@ def reset_localization():
     )
 
     reset_mapping_pose_zero()
+
+    localization_reset_id += 1
+
+    localization_table.putNumber(
+        "ResetId",
+        localization_reset_id
+    )
+
+    localization_table.putNumber(
+        "RobotX",
+        0.0
+    )
+
+    localization_table.putNumber(
+        "RobotY",
+        0.0
+    )
+
+    localization_table.putNumber(
+        "RobotHeading",
+        0.0
+    )
+
+    localization_table.putString(
+        "LocalizationState",
+        "RESETTING"
+    )
 
 
     print(
@@ -4010,7 +4178,7 @@ try:
                 f"LiDAR move: {last_relative_translation:7.3f} m\n"
 
                 f"Pose lock: {str(pose_locked):<17} "
-                f"Q/E rotating: {rotating_text:<16} "
+                f"Q/E XY hold: {rotating_text:<16} "
                 f"Keyframe: {keyframe_number}\n"
 
                 f"Nearest: {obstacle_distance:7.2f} m         "
@@ -4025,6 +4193,9 @@ try:
                 f"Y={mapping_robot_y:6.2f} "
                 f"H={mapping_robot_heading:6.1f}°     "
                 f"Coverage: {get_map_coverage_percent():5.1f}%\n"
+
+                "Direction check: "
+                "W = +forward / S = backward\n"
 
                 "\n"
 

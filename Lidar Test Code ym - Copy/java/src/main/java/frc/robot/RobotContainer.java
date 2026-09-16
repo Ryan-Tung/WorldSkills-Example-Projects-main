@@ -9,6 +9,7 @@ import frc.robot.subsystems.DriveTrain;
 import frc.robot.subsystems.LidarTest;
 import frc.robot.subsystems.CobraTest;
 import frc.robot.subsystems.LidarLocalization;
+import frc.robot.subsystems.FusionLocalization;
 
 import frc.robot.gamepad.OI;
 
@@ -33,6 +34,20 @@ public class RobotContainer
 
     public static final LidarLocalization lidarLocalization =
             new LidarLocalization();
+
+
+    /*
+     * One shared FusionLocalization subsystem.
+     *
+     * Keeping it here guarantees that:
+     * - only one fusion subsystem exists
+     * - FusionLocalizationCommand and Robot use the same object
+     * - its periodic() is registered with CommandScheduler
+     */
+    public static final FusionLocalization fusionLocalization =
+            new FusionLocalization(
+                    driveTrain
+            );
 
 
     // =====================================================
@@ -84,6 +99,15 @@ public class RobotContainer
          *
          * It reads localization values from
          * NetworkTables that will be sent by Python.
+         */
+
+
+        /*
+         * FusionLocalization is created once above and is
+         * registered automatically as a SubsystemBase.
+         *
+         * The fusion command starts/stops it when
+         * FUSION_LOCALIZATION mode is selected.
          */
     }
 }

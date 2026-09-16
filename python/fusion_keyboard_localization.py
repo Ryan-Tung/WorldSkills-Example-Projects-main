@@ -1388,6 +1388,11 @@ def publish_lidar_localization():
         lidar_reset_id
     )
 
+    lidar_localization_table.putString(
+        "EstimatorMode",
+        "SENSOR_DRIVEN_NO_COMMAND_GATING"
+    )
+
 
 def update_lidar_localization(
         current_scan):
@@ -1467,73 +1472,36 @@ def update_lidar_localization(
     )
 
     # --------------------------------------------------------
-    # IDLE:
+    # SENSOR-DRIVEN LiDAR ODOMETRY
     #
-    # Refresh LiDAR reference but do not invent translation.
+    # IMPORTANT FOR THE FUSION EXPERIMENT:
     #
-    # This prevents stationary ICP drift from feeding fusion.
+    # We do NOT decide LiDAR X/Y movement from keyboard input.
+    #
+    # Every valid scan pair is processed by ICP.
+    #
+    # navX supplies the known heading change between scans.
+    # ICP estimates translation.
+    #
+    # Therefore:
+    #
+    # - stationary robot:
+    #     ICP should naturally estimate approximately zero
+    #     translation; tiny motion is removed by the existing
+    #     STATIONARY_TRANSLATION_M filter.
+    #
+    # - pure rotation:
+    #     navX supplies rotation, ICP should naturally estimate
+    #     approximately zero translation.
+    #
+    # - translation:
+    #     ICP estimates X/Y movement.
+    #
+    # - move + turn:
+    #     navX supplies rotation and ICP estimates translation.
+    #
+    # No W/A/S/D/Q/E rule is used to force the LiDAR pose.
     # --------------------------------------------------------
-
-    if (
-        not translation_commanded()
-        and
-        not rotation_commanded()
-    ):
-
-        previous_good_scan = (
-            current_scan.copy()
-        )
-
-        previous_navx_heading = (
-            relative_heading
-        )
-
-        localization_valid = True
-        localization_state = "IDLE_HOLD"
-
-        last_translation_m = 0.0
-
-        publish_lidar_localization()
-
-        return
-
-    # --------------------------------------------------------
-    # PURE Q / E:
-    #
-    # navX handles heading.
-    # Refresh LiDAR reference and keep LiDAR X/Y fixed.
-    #
-    # The FUSION pose is still allowed to move slightly from
-    # real encoder translation during rotation.
-    # --------------------------------------------------------
-
-    if pure_rotation_commanded():
-
-        previous_good_scan = (
-            current_scan.copy()
-        )
-
-        previous_navx_heading = (
-            relative_heading
-        )
-
-        localization_valid = True
-        localization_state = "PURE_ROTATION"
-
-        last_translation_m = 0.0
-
-        if should_create_keyframe(
-            relative_heading
-        ):
-
-            create_keyframe(
-                current_scan,
-                relative_heading
-            )
-
-        publish_lidar_localization()
-
-        return
 
     # --------------------------------------------------------
     # NORMAL ICP
@@ -1709,10 +1677,15 @@ def update_lidar_localization(
         localization_valid = True
 
         if used_recovery:
+
             localization_state = "RECOVERY"
-        elif rotation_commanded():
-            localization_state = "TRACKING_TURN"
+
+        elif abs(heading_delta) >= 0.40:
+
+            localization_state = "TRACKING_TURN_SENSOR"
+
         else:
+
             localization_state = "TRACKING"
 
         previous_good_scan = (
@@ -3386,7 +3359,8 @@ def tracking_update():
     lidar_state_label.config(
         text=(
             f"LiDAR ICP: "
-            f"{localization_state}"
+            f"{localization_state}\n"
+            "Estimator: SENSOR-DRIVEN"
         )
     )
 
@@ -3674,7 +3648,9 @@ controls_label = ttk.Label(
         "R = Reset LiDAR ICP only\n"
         "P = Save route CSV\n"
         "M = Save occupancy map\n"
-        "ESC = Close"
+        "ESC = Close\n\n"
+        "Fusion test: sensor-driven estimator\n"
+        "(no command-based X/Y locking)"
     ),
     justify="left"
 )

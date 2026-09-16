@@ -19,7 +19,6 @@ import frc.robot.commands.KeyboardDrive;
 import frc.robot.commands.EncoderLocalizationTest;
 import frc.robot.commands.FusionLocalizationCommand;
 
-import frc.robot.subsystems.FusionLocalization;
 
 
 public class Robot extends TimedRobot
@@ -32,13 +31,18 @@ public class Robot extends TimedRobot
 
 
     // =====================================================
-    // FUSION LOCALIZATION
+    // ACTIVE TELEOP MODE
     //
-    // Separate subsystem so existing DriveTrain,
-    // LiDAR, Cobra and keyboard code are not modified.
+    // The old code only read the chooser once in teleopInit().
+    // If the chooser was changed AFTER Teleop was enabled,
+    // FUSION_LOCALIZATION was visible in Shuffleboard but was
+    // never actually scheduled.
+    //
+    // We keep track of the currently scheduled mode so chooser
+    // changes can safely take effect during Teleop.
     // =====================================================
 
-    private FusionLocalization fusionLocalization;
+    private String activeTeleopMode = "";
 
 
     // =====================================================
@@ -53,18 +57,6 @@ public class Robot extends TimedRobot
         // =================================================
 
         new RobotContainer();
-
-
-        // =================================================
-        // CREATE FUSION SUBSYSTEM
-        //
-        // Uses existing DriveTrain encoder odometry.
-        // =================================================
-
-        fusionLocalization =
-                new FusionLocalization(
-                        RobotContainer.driveTrain
-                );
 
 
         // =================================================
@@ -102,7 +94,10 @@ public class Robot extends TimedRobot
         addAutoMode(
                 RobotContainer.autoChooser,
                 "LIDAR_LOCALIZATION",
-                new LocalizationMonitor()
+                new ParallelCommandGroup(
+                        new KeyboardDrive(),
+                        new LocalizationMonitor()
+                )
         );
 
 
@@ -126,9 +121,7 @@ public class Robot extends TimedRobot
         addAutoMode(
                 RobotContainer.autoChooser,
                 "ENCODER_LOCALIZATION",
-                new EncoderLocalizationTest(
-                        RobotContainer.driveTrain
-                )
+                new KeyboardDrive()
         );
 
 
@@ -153,7 +146,7 @@ public class Robot extends TimedRobot
                         new KeyboardDrive(),
 
                         new FusionLocalizationCommand(
-                                fusionLocalization
+                                RobotContainer.fusionLocalization
                         )
                 )
         );
@@ -188,6 +181,18 @@ public class Robot extends TimedRobot
                 "Keyboard Drive State",
                 "STOPPED"
         );
+
+
+        SmartDashboard.putString(
+                "Active Teleop Mode",
+                "NONE"
+        );
+
+
+        SmartDashboard.putString(
+                "Mode Schedule Status",
+                "NOT SCHEDULED"
+        );
     }
 
 
@@ -210,6 +215,142 @@ public class Robot extends TimedRobot
                 auto,
                 cmd
         );
+    }
+
+
+    // =====================================================
+    // GET CURRENT CHOOSER SELECTION
+    // =====================================================
+
+    private String getSelectedModeName()
+    {
+        String selectedMode =
+                RobotContainer.autoChooser
+                        .getSelected();
+
+
+        if (selectedMode == null)
+        {
+            selectedMode =
+                    "LIDAR_MOVING";
+        }
+
+
+        return selectedMode;
+    }
+
+
+    // =====================================================
+    // SCHEDULE SELECTED TELEOP MODE
+    //
+    // forceRestart = true:
+    //     used when Teleop first starts
+    //
+    // forceRestart = false:
+    //     only changes command when chooser selection changes
+    // =====================================================
+
+    private void scheduleSelectedTeleopMode(
+            boolean forceRestart)
+    {
+        String selectedMode =
+                getSelectedModeName();
+
+
+        boolean modeChanged =
+                !selectedMode.equals(
+                        activeTeleopMode
+                );
+
+
+        if (
+            !forceRestart
+            &&
+            !modeChanged
+        )
+        {
+            return;
+        }
+
+
+        // -------------------------------------------------
+        // STOP PREVIOUS MODE
+        // -------------------------------------------------
+
+        if (selectedCommand != null)
+        {
+            selectedCommand.cancel();
+
+            selectedCommand =
+                    null;
+        }
+
+
+        RobotContainer.driveTrain
+                .holonomicDrive(
+                        0.0,
+                        0.0,
+                        0.0
+                );
+
+
+        // -------------------------------------------------
+        // GET NEW MODE COMMAND
+        // -------------------------------------------------
+
+        selectedCommand =
+                RobotContainer.autoMode
+                        .get(
+                                selectedMode
+                        );
+
+
+        activeTeleopMode =
+                selectedMode;
+
+
+        // -------------------------------------------------
+        // SHOW EXACT MODE THAT WAS ACTUALLY SCHEDULED
+        // -------------------------------------------------
+
+        SmartDashboard.putString(
+                "Selected Robot Mode",
+                selectedMode
+        );
+
+
+        SmartDashboard.putString(
+                "Active Teleop Mode",
+                activeTeleopMode
+        );
+
+
+        // -------------------------------------------------
+        // START NEW MODE
+        // -------------------------------------------------
+
+        if (selectedCommand != null)
+        {
+            selectedCommand.schedule();
+
+
+            SmartDashboard.putString(
+                    "Mode Schedule Status",
+                    "SCHEDULED: "
+                    +
+                    selectedMode
+            );
+        }
+
+        else
+        {
+            SmartDashboard.putString(
+                    "Mode Schedule Status",
+                    "COMMAND NOT FOUND: "
+                    +
+                    selectedMode
+            );
+        }
     }
 
 
@@ -264,6 +405,22 @@ public class Robot extends TimedRobot
 
         selectedCommand =
                 null;
+
+
+        activeTeleopMode =
+                "";
+
+
+        SmartDashboard.putString(
+                "Active Teleop Mode",
+                "NONE"
+        );
+
+
+        SmartDashboard.putString(
+                "Mode Schedule Status",
+                "DISABLED"
+        );
 
 
         // Stop drivetrain
@@ -330,60 +487,38 @@ public class Robot extends TimedRobot
     @Override
     public void teleopInit()
     {
-        // =================================================
-        // CANCEL PREVIOUS COMMAND
-        // =================================================
-
+        // Cancel anything left from a previous robot mode.
         CommandScheduler
                 .getInstance()
                 .cancelAll();
 
 
-        // =================================================
-        // GET SELECTED SHUFFLEBOARD MODE
-        // =================================================
-
-        String selectedMode =
-                RobotContainer.autoChooser
-                        .getSelected();
-
-
-        if (selectedMode == null)
-        {
-            selectedMode =
-                    "LIDAR_MOVING";
-        }
-
-
-        // =================================================
-        // GET COMMAND
-        // =================================================
-
         selectedCommand =
-                RobotContainer.autoMode
-                        .get(
-                                selectedMode
-                        );
+                null;
 
 
-        // =================================================
-        // SHOW MODE
-        // =================================================
+        activeTeleopMode =
+                "";
 
-        SmartDashboard.putString(
-                "Selected Robot Mode",
-                selectedMode
+
+        RobotContainer.driveTrain
+                .holonomicDrive(
+                        0.0,
+                        0.0,
+                        0.0
+                );
+
+
+        /*
+         * Schedule whatever is currently selected.
+         *
+         * If Shuffleboard delivers a different chooser value a
+         * little later, teleopPeriodic() below will detect the
+         * change and safely switch modes.
+         */
+        scheduleSelectedTeleopMode(
+                true
         );
-
-
-        // =================================================
-        // RUN COMMAND
-        // =================================================
-
-        if (selectedCommand != null)
-        {
-            selectedCommand.schedule();
-        }
     }
 
 
@@ -395,11 +530,23 @@ public class Robot extends TimedRobot
     public void teleopPeriodic()
     {
         /*
-         * CommandScheduler runs in robotPeriodic().
+         * CommandScheduler itself runs in robotPeriodic().
          *
-         * Selected mode will therefore continuously
-         * execute while Teleop is enabled.
+         * Here we only watch for a chooser change.
+         *
+         * This means:
+         *
+         * 1. Robot can already be in Teleop.
+         * 2. User selects FUSION_LOCALIZATION in Shuffleboard.
+         * 3. Previous command is cancelled.
+         * 4. ParallelCommandGroup is scheduled immediately.
+         * 5. FusionLocalizationCommand.initialize() calls
+         *    startFusion().
+         * 6. FusionLocalization/Active becomes TRUE.
          */
+        scheduleSelectedTeleopMode(
+                false
+        );
     }
 
 
